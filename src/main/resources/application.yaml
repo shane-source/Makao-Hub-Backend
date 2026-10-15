@@ -2,6 +2,23 @@ spring:
   application:
     name: makao-hub-backend
 
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    protocol: smtp
+    properties:
+      "[mail.smtp.auth]": true
+      "[mail.smtp.starttls.enable]": true
+      "[mail.smtp.starttls.required]": true
+      "[mail.smtp.ssl.checkserveridentity]": true
+      "[mail.smtp.ssl.protocols]": "TLSv1.3 TLSv1.2"
+      "[mail.smtp.connectiontimeout]": 5000
+      "[mail.smtp.timeout]": 10000
+      "[mail.smtp.writetimeout]": 10000
+      "[mail.debug]": false
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -32,7 +49,16 @@ management:
       exposure:
         include: health,info
 
+# Malformed customer PDFs can contain sensitive strings. Parser diagnostics are
+# deliberately suppressed; callers receive the fixed validation message instead.
+logging:
+  level:
+    org.apache.pdfbox: OFF
+
 security:
+  verification:
+    clamav-socket-path: ${CLAMAV_SOCKET_PATH:}
+
   phone:
     encryption-key: ${PHONE_ENCRYPTION_KEY}
     lookup-hmac-key: ${PHONE_LOOKUP_HMAC_KEY}
@@ -43,10 +69,9 @@ security:
   google:
     client-id: ${GOOGLE_CLIENT_ID}
 
-  twilio-verify:
-    api-key-sid: ${TWILIO_API_KEY_SID}
-    api-key-secret: ${TWILIO_API_KEY_SECRET}
-    service-sid: ${TWILIO_VERIFY_SERVICE_SID}
+  email-otp:
+    from-email: ${OTP_FROM_EMAIL:}
+    hmac-key: ${OTP_HMAC_KEY:}
 
   jwt:
     issuer: ${JWT_ISSUER:makao-hub-backend}
@@ -66,9 +91,35 @@ security:
     verification-confirmations-per-hour: ${VERIFICATION_CONFIRMATIONS_PER_HOUR:24}
     verification-submissions-per-day: ${VERIFICATION_SUBMISSIONS_PER_DAY:5}
 
+  websocket:
+    allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:9000}
+    inbound-message-size-bytes: ${WEBSOCKET_INBOUND_MESSAGE_SIZE_BYTES:8192}
+    messages-per-minute: ${WEBSOCKET_MESSAGES_PER_MINUTE:30}
+
 storage:
   supabase:
     url: ${SUPABASE_URL}
     service-role-key: ${SUPABASE_SERVICE_ROLE_KEY}
     avatar-bucket: ${SUPABASE_AVATAR_BUCKET:avatars}
     verification-bucket: ${SUPABASE_VERIFICATION_BUCKET:verification-docs}
+    listing-media-bucket: ${SUPABASE_LISTING_MEDIA_BUCKET:listing-media}
+
+
+makao:
+  role-switch:
+    enabled: ${MAKAO_ROLE_SWITCH_ENABLED:false}
+  daraja:
+    enabled: ${DARAJA_ENABLED:false}
+    base-url: ${DARAJA_BASE_URL:https://sandbox.safaricom.co.ke}
+    consumer-key: ${DARAJA_CONSUMER_KEY:}
+    consumer-secret: ${DARAJA_CONSUMER_SECRET:}
+    short-code: ${DARAJA_SHORT_CODE:}
+    passkey: ${DARAJA_PASSKEY:}
+    callback-url: ${DARAJA_CALLBACK_URL:}
+  paystack:
+    enabled: ${MAKAO_PAYSTACK_ENABLED:false}
+    base-url: ${MAKAO_PAYSTACK_BASE_URL:https://api.paystack.co}
+    secret-key: ${MAKAO_PAYSTACK_SECRET_KEY:}
+  payment:
+    prices:
+      booking-deposit-minor: ${MAKAO_BOOKING_DEPOSIT_MINOR:}

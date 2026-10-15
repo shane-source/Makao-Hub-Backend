@@ -8,6 +8,7 @@ import com.makaohub.backend.auth.exception.AuthException;
 import com.makaohub.backend.auth.repository.UserRepository;
 import com.makaohub.backend.auth.service.AuthenticationTokenService;
 import com.makaohub.backend.auth.service.PasswordAuthenticationService;
+import com.makaohub.backend.auth.service.LegacyRoleSelectionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,6 +39,9 @@ class PasswordAuthenticationServiceTest {
     @Mock
     private AuthenticationTokenService authenticationTokenService;
 
+    @Mock
+    private LegacyRoleSelectionService roleSelectionService;
+
     private PasswordEncoder passwordEncoder;
     private PasswordAuthenticationService authenticationService;
 
@@ -49,7 +53,8 @@ class PasswordAuthenticationServiceTest {
                 new PasswordAuthenticationService(
                         userRepository,
                         passwordEncoder,
-                        authenticationTokenService
+                        authenticationTokenService,
+                        roleSelectionService
                 );
     }
 
@@ -86,6 +91,7 @@ class PasswordAuthenticationServiceTest {
         assertSame(expectedResponse, actualResponse);
 
         verify(authenticationTokenService).issue(user);
+        verify(roleSelectionService).resolve(user, null);
     }
 
     @Test
@@ -124,5 +130,6 @@ class PasswordAuthenticationServiceTest {
                 authenticationTokenService,
                 never()
         ).issue(user);
+        org.mockito.Mockito.verifyNoInteractions(roleSelectionService);
     }
 }

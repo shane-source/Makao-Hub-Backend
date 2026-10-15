@@ -100,7 +100,9 @@ public class Listing {
             short bathroomCount,
             boolean furnished,
             LocalDate availableFrom
-    ) {
+    )
+
+    {
         this.title = Objects.requireNonNull(title).strip();
         this.description = Objects.requireNonNull(description).strip();
         this.propertyType = Objects.requireNonNull(propertyType);
@@ -109,6 +111,46 @@ public class Listing {
         this.bathroomCount = bathroomCount;
         this.furnished = furnished;
         this.availableFrom = availableFrom;
+    }
+
+    public void publish() {
+        if (status != ListingStatus.DRAFT) {
+            throw new IllegalStateException(
+                    "Only draft listings can be published."
+            );
+        }
+
+        status = ListingStatus.PUBLISHED;
+    }
+
+    public void pause() {
+        if (status != ListingStatus.PUBLISHED) {
+            throw new IllegalStateException(
+                    "Only published listings can be paused."
+            );
+        }
+
+        status = ListingStatus.PAUSED;
+    }
+
+    public void resume() {
+        if (status != ListingStatus.PAUSED) {
+            throw new IllegalStateException(
+                    "Only paused listings can be resumed."
+            );
+        }
+
+        status = ListingStatus.PUBLISHED;
+    }
+
+    public void archive() {
+        if (status == ListingStatus.ARCHIVED) {
+            throw new IllegalStateException(
+                    "Listing is already archived."
+            );
+        }
+
+        status = ListingStatus.ARCHIVED;
     }
 
     public UUID getId() {

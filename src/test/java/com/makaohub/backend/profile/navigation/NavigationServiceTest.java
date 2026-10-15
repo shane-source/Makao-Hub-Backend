@@ -71,7 +71,7 @@ class NavigationServiceTest {
         when(role.getName()).thenReturn(
                 RoleName.RENTER,
                 RoleName.LANDLORD,
-                RoleName.ROOMMATE_SEEKER
+                RoleName.SUBLESSOR
         );
 
         assertNavigation(
@@ -112,16 +112,18 @@ class NavigationServiceTest {
 
         assertNavigation(
                 navigationService.getNavigation(USER_ID),
-                RoleName.ROOMMATE_SEEKER,
+                RoleName.SUBLESSOR,
                 List.of(
-                        NavigationItemKey.HOME,
-                        NavigationItemKey.REQUESTS,
+                        NavigationItemKey.DASHBOARD,
+                        NavigationItemKey.LISTINGS,
+                        NavigationItemKey.ROOMMATES,
                         NavigationItemKey.INBOX,
                         NavigationItemKey.PROFILE
                 ),
                 List.of(
-                        "/home",
-                        "/requests",
+                        "/dashboard",
+                        "/listings",
+                        "/roommates",
                         "/inbox",
                         "/profile"
                 )

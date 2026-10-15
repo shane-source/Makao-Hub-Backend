@@ -36,14 +36,28 @@ public class LandlordListingController {
             @AuthenticationPrincipal Jwt jwt,
             @Valid @RequestBody CreateListingDraftRequest request
     ) {
-        return listingService.createDraft(extractUserId(jwt), request);
+        return listingService.createDraft(
+                extractUserId(jwt),
+                request
+        );
+    }
+
+    @GetMapping("/dashboard")
+    public LandlordDashboardResponse getDashboardSummary(
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        return listingService.getDashboardSummary(
+                extractUserId(jwt)
+        );
     }
 
     @GetMapping
     public List<ListingResponse> getMyListings(
             @AuthenticationPrincipal Jwt jwt
     ) {
-        return listingService.getMyListings(extractUserId(jwt));
+        return listingService.getMyListings(
+                extractUserId(jwt)
+        );
     }
 
     @PatchMapping("/{listingId}")
@@ -56,6 +70,50 @@ public class LandlordListingController {
                 extractUserId(jwt),
                 listingId,
                 request
+        );
+    }
+
+    @PostMapping("/{listingId}/publish")
+    public ListingResponse publishListing(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID listingId
+    ) {
+        return listingService.publish(
+                extractUserId(jwt),
+                listingId
+        );
+    }
+
+    @PostMapping("/{listingId}/pause")
+    public ListingResponse pauseListing(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID listingId
+    ) {
+        return listingService.pause(
+                extractUserId(jwt),
+                listingId
+        );
+    }
+
+    @PostMapping("/{listingId}/resume")
+    public ListingResponse resumeListing(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID listingId
+    ) {
+        return listingService.resume(
+                extractUserId(jwt),
+                listingId
+        );
+    }
+
+    @PostMapping("/{listingId}/archive")
+    public ListingResponse archiveListing(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID listingId
+    ) {
+        return listingService.archive(
+                extractUserId(jwt),
+                listingId
         );
     }
 

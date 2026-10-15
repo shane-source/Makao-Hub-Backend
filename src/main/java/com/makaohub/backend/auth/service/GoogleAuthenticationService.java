@@ -16,19 +16,27 @@ public class GoogleAuthenticationService {
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
     private final GoogleIdentityRepository googleIdentityRepository;
     private final AuthenticationTokenService authenticationTokenService;
+    private final LegacyRoleSelectionService roleSelectionService;
 
     public GoogleAuthenticationService(
             GoogleIdTokenVerifier googleIdTokenVerifier,
             GoogleIdentityRepository googleIdentityRepository,
-            AuthenticationTokenService authenticationTokenService
+            AuthenticationTokenService authenticationTokenService,
+            LegacyRoleSelectionService roleSelectionService
     ) {
         this.googleIdTokenVerifier = googleIdTokenVerifier;
         this.googleIdentityRepository = googleIdentityRepository;
         this.authenticationTokenService = authenticationTokenService;
+        this.roleSelectionService = roleSelectionService;
     }
 
     @Transactional
     public AuthTokensResponse authenticate(String idToken) {
+        return authenticationTokenService.issue(verifyIdentity(idToken));
+    }
+
+    @Transactional
+    public User verifyIdentity(String idToken) {
         GoogleIdTokenVerifier.VerifiedGoogleIdentity googleIdentity;
 
         try {
@@ -44,8 +52,7 @@ public class GoogleAuthenticationService {
                 googleIdentityRepository.findByGoogleSubject(
                         googleIdentity.subject()
                 ).orElseThrow(() -> new AuthException(
-                        AuthException.Reason
-                                .GOOGLE_REGISTRATION_REQUIRED,
+                        AuthException.Reason.GOOGLE_REGISTRATION_REQUIRED,
                         "Complete registration before signing in."
                 ));
 
@@ -58,6 +65,16 @@ public class GoogleAuthenticationService {
             );
         }
 
-        return authenticationTokenService.issue(user);
+        /*
+         * The role is not taken from Google request data.
+         * This only checks that the account has completed role selection.
+         */
+        roleSelectionService.resolve(user, null);
+
+        /*
+         * AuthenticationTokenService loads the stored role from the
+         * database and adds it to the access token.
+         */
+        return user;
     }
 }

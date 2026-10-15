@@ -51,6 +51,12 @@ public class User {
     @Column(name = "account_status", nullable = false, length = 20)
     private AccountStatus accountStatus = AccountStatus.ACTIVE;
 
+    @Column(name = "role_selection_required", nullable = false)
+    private boolean roleSelectionRequired;
+
+    @Column(name = "authorization_version", nullable = false)
+    private long authorizationVersion;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -86,12 +92,15 @@ public class User {
             String phoneLookupHash
     ) {
         this.fullName = normalizeFullName(fullName);
+
         this.email = Objects.requireNonNull(email)
                 .trim()
                 .toLowerCase(Locale.ROOT);
+
         this.phoneCiphertext = Objects
                 .requireNonNull(phoneCiphertext)
                 .clone();
+
         this.phoneLookupHash =
                 Objects.requireNonNull(phoneLookupHash);
     }
@@ -122,6 +131,11 @@ public class User {
         return passwordHash;
     }
 
+    public void changePasswordHash(String passwordHash) {
+        this.passwordHash = Objects.requireNonNull(passwordHash);
+        invalidateAuthorization();
+    }
+
     public byte[] getPhoneCiphertext() {
         return phoneCiphertext.clone();
     }
@@ -132,6 +146,34 @@ public class User {
 
     public AccountStatus getAccountStatus() {
         return accountStatus;
+    }
+
+    public boolean isRoleSelectionRequired() {
+        return roleSelectionRequired;
+    }
+
+    public long getAuthorizationVersion() {
+        return authorizationVersion;
+    }
+
+    public void invalidateAuthorization() {
+        authorizationVersion = Math.incrementExact(
+                authorizationVersion
+        );
+    }
+
+    public void completeRoleSelection() {
+        if (!roleSelectionRequired) {
+            throw new IllegalStateException(
+                    "This account does not require a role choice."
+            );
+        }
+
+        authorizationVersion = Math.incrementExact(
+                authorizationVersion
+        );
+
+        roleSelectionRequired = false;
     }
 
     public Instant getCreatedAt() {
@@ -147,7 +189,8 @@ public class User {
     }
 
     public void changeAvatarObjectPath(String avatarObjectPath) {
-        this.avatarObjectPath = Objects.requireNonNull(avatarObjectPath)
-                .strip();
+        this.avatarObjectPath = Objects.requireNonNull(
+                avatarObjectPath
+        ).strip();
     }
 }

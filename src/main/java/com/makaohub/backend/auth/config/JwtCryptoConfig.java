@@ -104,7 +104,8 @@ public class JwtCryptoConfig {
     @Bean
     JwtDecoder jwtDecoder(
             RSAPublicKey publicKey,
-            JwtSecurityProperties properties
+            JwtSecurityProperties properties,
+            CurrentAccountJwtValidator currentAccountValidator
     ) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder
                 .withPublicKey(publicKey)
@@ -122,7 +123,8 @@ public class JwtCryptoConfig {
         decoder.setJwtValidator(
                 new DelegatingOAuth2TokenValidator<>(
                         issuerValidator,
-                        audienceValidator
+                        audienceValidator,
+                        currentAccountValidator
                 )
         );
 

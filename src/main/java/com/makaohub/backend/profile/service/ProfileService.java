@@ -10,6 +10,9 @@ import com.makaohub.backend.auth.repository.UserRoleRepository;
 import com.makaohub.backend.auth.service.PhoneProtectionService;
 import com.makaohub.backend.profile.api.MyProfileResponse;
 import com.makaohub.backend.storage.service.SupabaseStorageClient;
+import com.makaohub.backend.verification.domain.RoleVerification;
+import com.makaohub.backend.verification.domain.VerificationStatus;
+import com.makaohub.backend.verification.repository.RoleVerificationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,17 +27,20 @@ public class ProfileService {
     private final UserRoleRepository userRoleRepository;
     private final PhoneProtectionService phoneProtectionService;
     private final SupabaseStorageClient storageClient;
+    private final RoleVerificationRepository verificationRepository;
 
     public ProfileService(
             UserRepository userRepository,
             UserRoleRepository userRoleRepository,
             PhoneProtectionService phoneProtectionService,
-            SupabaseStorageClient storageClient
+            SupabaseStorageClient storageClient,
+            RoleVerificationRepository verificationRepository
     ) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
         this.phoneProtectionService = phoneProtectionService;
         this.storageClient = storageClient;
+        this.verificationRepository = verificationRepository;
     }
 
     @Transactional(readOnly = true)
@@ -84,7 +90,10 @@ public class ProfileService {
                 role,
                 user.getAccountStatus(),
                 user.getCreatedAt(),
-                avatarUrl
+                avatarUrl,
+                verificationRepository.findByUserIdAndRole(authenticatedUserId, role)
+                        .map(RoleVerification::getStatus)
+                        .orElse(VerificationStatus.NOT_STARTED)
         );
     }
 

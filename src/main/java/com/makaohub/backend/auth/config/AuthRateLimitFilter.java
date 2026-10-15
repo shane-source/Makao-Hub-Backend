@@ -9,6 +9,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -17,39 +18,53 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import org.springframework.http.HttpStatus;
 
 public class AuthRateLimitFilter extends OncePerRequestFilter {
 
-    private static final Map<String, RateLimit> RATE_LIMITS = Map.of(
-            "/api/v1/auth/login",
-            new RateLimit(10, Duration.ofMinutes(1)),
+    private static final Map<String, RateLimit> RATE_LIMITS = Map.ofEntries(
+            Map.entry("/api/v1/auth/login", new RateLimit(10, Duration.ofMinutes(1))),
 
-            "/api/v1/auth/register",
-            new RateLimit(5, Duration.ofHours(1)),
+            Map.entry("/api/v1/auth/register", new RateLimit(5, Duration.ofHours(1))),
 
-            "/api/v1/auth/google",
-            new RateLimit(10, Duration.ofMinutes(1)),
+            Map.entry("/api/v1/auth/register/verify-otp", new RateLimit(10, Duration.ofMinutes(15))),
 
-            "/api/v1/auth/google/register",
-            new RateLimit(5, Duration.ofHours(1)),
+            Map.entry("/api/v1/auth/google", new RateLimit(10, Duration.ofMinutes(1))),
 
-            "/api/v1/auth/refresh",
-            new RateLimit(30, Duration.ofMinutes(1)),
+            Map.entry("/api/v1/auth/login/verify-otp", new RateLimit(10, Duration.ofMinutes(15))),
 
-            "/api/v1/auth/logout",
-            new RateLimit(30, Duration.ofMinutes(1))
+            Map.entry("/api/v1/auth/google/verify-otp", new RateLimit(10, Duration.ofMinutes(15))),
+
+            Map.entry("/api/v1/auth/forgot-password", new RateLimit(5, Duration.ofHours(1))),
+
+            Map.entry("/api/v1/auth/forgot-password/reset", new RateLimit(10, Duration.ofHours(1))),
+
+            Map.entry("/api/v1/auth/google/register", new RateLimit(5, Duration.ofHours(1))),
+
+            Map.entry("/api/v1/auth/refresh", new RateLimit(30, Duration.ofMinutes(1))),
+
+            Map.entry("/api/v1/auth/logout", new RateLimit(30, Duration.ofMinutes(1))),
+
+            Map.entry("/api/v1/profile/me/role/google-challenge", new RateLimit(10, Duration.ofMinutes(15))),
+
+            Map.entry("/api/v1/profile/me/role/switch", new RateLimit(10, Duration.ofMinutes(15)))
     );
 
-    private final Cache<String, Bucket> buckets = Caffeine.newBuilder()
-            .maximumSize(50_000)
-            .expireAfterAccess(Duration.ofHours(2))
-            .build();
+    // ponytail: per-instance limits reset on restart or cache eviction.
+    // Use shared enforcement before deploying multiple replicas.
+    private final Cache<String, Bucket> buckets =
+            Caffeine.newBuilder()
+                    .maximumSize(50_000)
+                    .expireAfterAccess(Duration.ofHours(2))
+                    .build();
 
     @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) {
+    protected boolean shouldNotFilter(
+            HttpServletRequest request
+    ) {
         return !HttpMethod.POST.matches(request.getMethod())
-                || !RATE_LIMITS.containsKey(request.getRequestURI());
+                || !RATE_LIMITS.containsKey(
+                request.getRequestURI()
+        );
     }
 
     @Override

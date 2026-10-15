@@ -1,6 +1,7 @@
 package com.makaohub.backend.auth.api;
 
 import com.makaohub.backend.auth.service.AuthenticationTokenService;
+import com.makaohub.backend.auth.service.AuthOtpService;
 import com.makaohub.backend.auth.service.GoogleAuthenticationService;
 import com.makaohub.backend.auth.service.GoogleRegistrationService;
 import com.makaohub.backend.auth.service.PasswordAuthenticationService;
@@ -24,6 +25,7 @@ public class AuthController {
     private final GoogleRegistrationService googleRegistrationService;
     private final AuthenticationTokenService authenticationTokenService;
     private final RefreshTokenService refreshTokenService;
+    private final AuthOtpService authOtpService;
 
     public AuthController(
             RegistrationService registrationService,
@@ -31,7 +33,8 @@ public class AuthController {
             GoogleAuthenticationService googleAuthenticationService,
             GoogleRegistrationService googleRegistrationService,
             AuthenticationTokenService authenticationTokenService,
-            RefreshTokenService refreshTokenService
+            RefreshTokenService refreshTokenService,
+            AuthOtpService authOtpService
     ) {
         this.registrationService = registrationService;
         this.passwordAuthenticationService =
@@ -43,23 +46,56 @@ public class AuthController {
         this.authenticationTokenService =
                 authenticationTokenService;
         this.refreshTokenService = refreshTokenService;
+        this.authOtpService = authOtpService;
     }
 
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
-    public RegisterResponse register(
+    public OtpChallengeResponse register(
             @Valid @RequestBody RegisterRequest request
     ) {
         return registrationService.register(request);
     }
 
+    @PostMapping("/register/verify-otp")
+    public AuthTokensResponse verifyRegistrationOtp(
+            @Valid @RequestBody OtpVerifyRequest request
+    ) {
+        return authOtpService.verifyRegistration(
+                request.parsedChallengeId(), request.code()
+        );
+    }
+
     @PostMapping("/login")
-    public AuthTokensResponse login(
+    public OtpChallengeResponse login(
             @Valid @RequestBody LoginRequest request
     ) {
-        return passwordAuthenticationService.authenticate(
-                request
+        return authOtpService.startLogin(
+                passwordAuthenticationService.verifyCredentials(request)
         );
+    }
+
+    @PostMapping("/login/verify-otp")
+    public AuthTokensResponse verifyLoginOtp(
+            @Valid @RequestBody OtpVerifyRequest request
+    ) {
+        return authOtpService.verifyLogin(request.parsedChallengeId(), request.code());
+    }
+
+    @PostMapping("/forgot-password")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public PasswordResetAcceptedResponse forgotPassword(
+            @Valid @RequestBody ForgotPasswordRequest request
+    ) {
+        return authOtpService.requestPasswordReset(request.email());
+    }
+
+    @PostMapping("/forgot-password/reset")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void resetPassword(
+            @Valid @RequestBody ResetPasswordRequest request
+    ) {
+        authOtpService.resetPassword(request.email(), request.code(), request.newPassword());
     }
 
     @PostMapping("/refresh")
@@ -83,18 +119,25 @@ public class AuthController {
 
     @PostMapping("/google/register")
     @ResponseStatus(HttpStatus.CREATED)
-    public AuthTokensResponse registerWithGoogle(
+    public OtpChallengeResponse registerWithGoogle(
             @Valid @RequestBody GoogleRegistrationRequest request
     ) {
         return googleRegistrationService.register(request);
     }
 
     @PostMapping("/google")
-    public AuthTokensResponse authenticateWithGoogle(
+    public OtpChallengeResponse authenticateWithGoogle(
             @Valid @RequestBody GoogleAuthRequest request
     ) {
-        return googleAuthenticationService.authenticate(
-                request.idToken()
+        return authOtpService.startLogin(
+                googleAuthenticationService.verifyIdentity(request.idToken())
         );
+    }
+
+    @PostMapping("/google/verify-otp")
+    public AuthTokensResponse verifyGoogleOtp(
+            @Valid @RequestBody OtpVerifyRequest request
+    ) {
+        return authOtpService.verifyLogin(request.parsedChallengeId(), request.code());
     }
 }

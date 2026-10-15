@@ -27,6 +27,7 @@ class AuthRateLimitFilterTest {
         Map<String, Integer> endpointCapacities = Map.of(
                 "/api/v1/auth/login", 10,
                 "/api/v1/auth/register", 5,
+                "/api/v1/auth/register/verify-otp", 10,
                 "/api/v1/auth/google", 10,
                 "/api/v1/auth/google/register", 5,
                 "/api/v1/auth/refresh", 30,

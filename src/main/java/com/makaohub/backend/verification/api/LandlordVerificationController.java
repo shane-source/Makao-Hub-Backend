@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/landlord/verification")
@@ -47,8 +48,14 @@ public class LandlordVerificationController {
         return verificationService.createDocumentUploadUrl(
                 extractUserId(jwt),
                 request.documentType(),
-                request.contentType()
+                request.contentType(),
+                request.replaceExisting()
         );
+    }
+
+    @GetMapping("/documents")
+    public List<LandlordVerificationDocumentResponse> getMyDocuments(@AuthenticationPrincipal Jwt jwt) {
+        return verificationService.getMyDocuments(extractUserId(jwt));
     }
 
     @PostMapping("/documents/{documentId}/confirm")

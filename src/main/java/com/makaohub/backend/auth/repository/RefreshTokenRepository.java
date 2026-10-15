@@ -1,6 +1,7 @@
 package com.makaohub.backend.auth.repository;
 
 import com.makaohub.backend.auth.domain.RefreshToken;
+import com.makaohub.backend.auth.domain.User;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -17,6 +18,20 @@ public interface RefreshTokenRepository
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
+            SELECT account
+            FROM User account
+            WHERE account.id = (
+                SELECT token.user.id
+                FROM RefreshToken token
+                WHERE token.tokenHash = :tokenHash
+            )
+            """)
+    Optional<User> findAccountByTokenHashForUpdate(
+            @Param("tokenHash") String tokenHash
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
             SELECT token
             FROM RefreshToken token
             WHERE token.tokenHash = :tokenHash
@@ -25,7 +40,10 @@ public interface RefreshTokenRepository
             @Param("tokenHash") String tokenHash
     );
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Modifying(
+            clearAutomatically = true,
+            flushAutomatically = true
+    )
     @Query("""
             UPDATE RefreshToken token
             SET token.revokedAt = :revokedAt,
@@ -36,6 +54,33 @@ public interface RefreshTokenRepository
     int revokeActiveTokenFamily(
             @Param("familyId") UUID familyId,
             @Param("revokedAt") Instant revokedAt,
+            @Param("reason") String reason
+    );
+
+    @Modifying(flushAutomatically = true)
+    @Query("""
+            UPDATE RefreshToken token
+            SET token.revokedAt = :now,
+                token.revocationReason = 'ROLE_SWITCH'
+            WHERE token.user.id = :userId
+              AND token.revokedAt IS NULL
+            """)
+    int revokeAllActiveForUser(
+            @Param("userId") UUID userId,
+            @Param("now") Instant now
+    );
+
+    @Modifying(flushAutomatically = true)
+    @Query("""
+            UPDATE RefreshToken token
+            SET token.revokedAt = :now,
+                token.revocationReason = :reason
+            WHERE token.user.id = :userId
+              AND token.revokedAt IS NULL
+            """)
+    int revokeAllActiveForUserWithReason(
+            @Param("userId") UUID userId,
+            @Param("now") Instant now,
             @Param("reason") String reason
     );
 }

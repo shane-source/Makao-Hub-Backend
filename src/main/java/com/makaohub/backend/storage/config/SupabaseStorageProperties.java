@@ -18,7 +18,10 @@ public record SupabaseStorageProperties(
         String avatarBucket,
 
         @NotBlank
-        String verificationBucket
+        String verificationBucket,
+
+        @NotBlank
+        String listingMediaBucket
 
 ) {
 }

@@ -85,6 +85,21 @@ public class ListingLocation {
         return areaLabel;
     }
 
+    public BigDecimal getApproximateLatitude() {
+        return approximateLatitude;
+    }
+
+    public BigDecimal getApproximateLongitude() {
+        return approximateLongitude;
+    }
+
+    public short getApproximateRadiusMeters() {
+        return approximateRadiusMeters;
+    }
+    public UUID getListingId() {
+        return listingId;
+    }
+
     public byte[] getExactCoordinatesCiphertext() {
         return exactCoordinatesCiphertext.clone();
     }

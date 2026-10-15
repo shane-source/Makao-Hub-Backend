@@ -2,6 +2,7 @@ package com.makaohub.backend.profile.api;
 
 import com.makaohub.backend.auth.domain.AccountStatus;
 import com.makaohub.backend.auth.domain.RoleName;
+import com.makaohub.backend.verification.domain.VerificationStatus;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -14,6 +15,7 @@ public record MyProfileResponse(
         RoleName role,
         AccountStatus accountStatus,
         Instant createdAt,
-        String avatarUrl
+        String avatarUrl,
+        VerificationStatus verificationStatus
 ) {
 }

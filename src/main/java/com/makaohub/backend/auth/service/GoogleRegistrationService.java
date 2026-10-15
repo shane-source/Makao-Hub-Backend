@@ -1,7 +1,7 @@
 package com.makaohub.backend.auth.service;
 
-import com.makaohub.backend.auth.api.AuthTokensResponse;
 import com.makaohub.backend.auth.api.GoogleRegistrationRequest;
+import com.makaohub.backend.auth.api.OtpChallengeResponse;
 import com.makaohub.backend.auth.domain.GoogleIdentity;
 import com.makaohub.backend.auth.domain.Role;
 import com.makaohub.backend.auth.domain.RoleName;
@@ -27,7 +27,7 @@ public class GoogleRegistrationService {
     private final UserRoleRepository userRoleRepository;
     private final PhoneProtectionService phoneProtectionService;
     private final LegalAcceptanceService legalAcceptanceService;
-    private final AuthenticationTokenService authenticationTokenService;
+    private final AuthOtpService authOtpService;
 
     public GoogleRegistrationService(
             GoogleIdTokenVerifier googleIdTokenVerifier,
@@ -37,7 +37,7 @@ public class GoogleRegistrationService {
             UserRoleRepository userRoleRepository,
             PhoneProtectionService phoneProtectionService,
             LegalAcceptanceService legalAcceptanceService,
-            AuthenticationTokenService authenticationTokenService
+            AuthOtpService authOtpService
     ) {
         this.googleIdTokenVerifier = googleIdTokenVerifier;
         this.googleIdentityRepository = googleIdentityRepository;
@@ -46,11 +46,11 @@ public class GoogleRegistrationService {
         this.userRoleRepository = userRoleRepository;
         this.phoneProtectionService = phoneProtectionService;
         this.legalAcceptanceService = legalAcceptanceService;
-        this.authenticationTokenService = authenticationTokenService;
+        this.authOtpService = authOtpService;
     }
 
     @Transactional
-    public AuthTokensResponse register(
+    public OtpChallengeResponse register(
             GoogleRegistrationRequest request
     ) {
         rejectAdminRole(request.role());
@@ -114,7 +114,8 @@ public class GoogleRegistrationService {
 
         legalAcceptanceService.recordCurrentDocuments(user);
 
-        return authenticationTokenService.issue(user);
+        // Apply the shared email challenge before issuing a Makao session. This does not verify the phone.
+        return authOtpService.startRegistration(user);
     }
 
     private GoogleIdTokenVerifier.VerifiedGoogleIdentity

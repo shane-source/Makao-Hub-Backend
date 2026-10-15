@@ -14,14 +14,21 @@ public record VerificationDocumentUploadUrlRequest(
 
         @NotBlank(message = "Content type is required.")
         @Pattern(
-                regexp = "image/(jpeg|png|webp)",
-                message = "Verification documents must be JPEG, PNG, or WebP images."
+                regexp = "(image/(jpeg|png|webp)|application/pdf)",
+                message = "Documents must be JPEG, PNG, WebP, or PDF files."
         )
-        String contentType
+        String contentType,
+
+        boolean replaceExisting
+
 ) {
+    public VerificationDocumentUploadUrlRequest(VerificationDocumentType documentType, String contentType) {
+        this(documentType, contentType, false);
+    }
     public VerificationDocumentUploadUrlRequest {
         if (contentType != null) {
-            contentType = contentType.strip()
+            contentType = contentType
+                    .strip()
                     .toLowerCase(Locale.ROOT);
         }
     }

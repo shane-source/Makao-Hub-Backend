@@ -29,4 +29,10 @@ public interface LandlordVerificationDocumentRepository
             UUID landlordId,
             VerificationDocumentStatus status
     );
+
+    List<LandlordVerificationDocument> findAllByLandlordIdAndDocumentTypeInAndStatusIn(
+            UUID landlordId,
+            Collection<VerificationDocumentType> types,
+            Collection<VerificationDocumentStatus> statuses
+    );
 }

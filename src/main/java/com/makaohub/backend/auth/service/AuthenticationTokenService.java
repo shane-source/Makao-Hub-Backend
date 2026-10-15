@@ -32,6 +32,7 @@ public class AuthenticationTokenService {
 
     @Transactional
     public AuthTokensResponse issue(User user) {
+        requireRoleSelected(user);
         RefreshTokenService.IssuedRefreshToken refreshToken =
                 refreshTokenService.issue(user);
 
@@ -62,6 +63,7 @@ public class AuthenticationTokenService {
                 "Refresh token cannot be null."
         );
 
+        requireRoleSelected(user);
         if (user.getAccountStatus() != AccountStatus.ACTIVE) {
             throw new IllegalStateException(
                     "Tokens cannot be issued for an inactive account."
@@ -99,5 +101,12 @@ public class AuthenticationTokenService {
                 user.getEmail(),
                 role
         );
+    }
+
+    private void requireRoleSelected(User user) {
+        if (user.isRoleSelectionRequired()) {
+            throw new AuthException(AuthException.Reason.ROLE_SELECTION_REQUIRED,
+                    "Choose RENTER or SUBLESSOR after authenticating again.");
+        }
     }
 }

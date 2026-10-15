@@ -18,6 +18,7 @@ public class RegistrationException extends RuntimeException {
         PHONE_ALREADY_REGISTERED,
         ADMIN_ROLE_NOT_ALLOWED,
         INVALID_PHONE_NUMBER,
+        PASSWORD_TOO_SHORT,
         PASSWORD_TOO_LONG,
         ROLE_NOT_CONFIGURED
     }

@@ -53,6 +53,10 @@ public class RefreshTokenService {
     public IssuedRefreshToken issue(User user) {
         Objects.requireNonNull(user, "User cannot be null.");
 
+        if (user.isRoleSelectionRequired() || user.getAccountStatus() != AccountStatus.ACTIVE) {
+            throw new AuthException(AuthException.Reason.ACCOUNT_UNAVAILABLE,
+                    "This account cannot receive refresh tokens.");
+        }
         if (user.getId() == null) {
             throw new IllegalArgumentException(
                     "Refresh tokens require a persisted user."
@@ -82,11 +86,15 @@ public class RefreshTokenService {
 
     @Transactional(noRollbackFor = AuthException.class)
     public RotatedRefreshToken rotate(String rawToken) {
+        // All session-changing flows acquire the account lock before token locks.
+        String tokenHash = hashToken(rawToken);
+        refreshTokenRepository.findAccountByTokenHashForUpdate(tokenHash)
+                .orElseThrow(this::invalidRefreshToken);
         Instant now = Instant.now(clock);
 
         RefreshToken currentToken =
                 refreshTokenRepository.findByTokenHashForUpdate(
-                        hashToken(rawToken)
+                        tokenHash
                 ).orElseThrow(this::invalidRefreshToken);
 
         if (currentToken.isUsed()
@@ -112,7 +120,7 @@ public class RefreshTokenService {
 
         User user = currentToken.getUser();
 
-        if (user.getAccountStatus() != AccountStatus.ACTIVE) {
+        if (user.getAccountStatus() != AccountStatus.ACTIVE || user.isRoleSelectionRequired()) {
             revokeFamily(
                     currentToken,
                     now,
@@ -157,8 +165,12 @@ public class RefreshTokenService {
 
     @Transactional
     public void revokeTokenFamily(String rawToken) {
+        String tokenHash = hashToken(rawToken);
+        if (refreshTokenRepository.findAccountByTokenHashForUpdate(tokenHash).isEmpty()) {
+            return;
+        }
         refreshTokenRepository.findByTokenHashForUpdate(
-                hashToken(rawToken)
+                tokenHash
         ).ifPresent(refreshToken -> revokeFamily(
                 refreshToken,
                 Instant.now(clock),

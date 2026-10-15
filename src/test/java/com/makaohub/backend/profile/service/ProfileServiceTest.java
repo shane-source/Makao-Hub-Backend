@@ -11,6 +11,8 @@ import com.makaohub.backend.auth.repository.UserRoleRepository;
 import com.makaohub.backend.auth.service.PhoneProtectionService;
 import com.makaohub.backend.profile.api.MyProfileResponse;
 import com.makaohub.backend.storage.service.SupabaseStorageClient;
+import com.makaohub.backend.verification.repository.RoleVerificationRepository;
+import com.makaohub.backend.verification.domain.VerificationStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -51,6 +53,9 @@ class ProfileServiceTest {
     private SupabaseStorageClient storageClient;
 
     @Mock
+    private RoleVerificationRepository verificationRepository;
+
+    @Mock
     private User user;
 
     @Mock
@@ -67,7 +72,8 @@ class ProfileServiceTest {
                 userRepository,
                 userRoleRepository,
                 phoneProtectionService,
-                storageClient
+                storageClient,
+                verificationRepository
         );
     }
 
@@ -110,6 +116,8 @@ class ProfileServiceTest {
         assertEquals(AccountStatus.ACTIVE, response.accountStatus());
         assertEquals(CREATED_AT, response.createdAt());
         assertEquals(null, response.avatarUrl());
+        assertEquals(VerificationStatus.NOT_STARTED, response.verificationStatus());
+        org.mockito.Mockito.verify(verificationRepository).findByUserIdAndRole(USER_ID, RoleName.LANDLORD);
     }
 
     @Test

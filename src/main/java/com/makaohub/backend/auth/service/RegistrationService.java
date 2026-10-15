@@ -1,7 +1,7 @@
 package com.makaohub.backend.auth.service;
 
 import com.makaohub.backend.auth.api.RegisterRequest;
-import com.makaohub.backend.auth.api.RegisterResponse;
+import com.makaohub.backend.auth.api.OtpChallengeResponse;
 import com.makaohub.backend.auth.domain.Role;
 import com.makaohub.backend.auth.domain.RoleName;
 import com.makaohub.backend.auth.domain.User;
@@ -28,6 +28,7 @@ public class RegistrationService {
     private final PasswordEncoder passwordEncoder;
     private final PhoneProtectionService phoneProtectionService;
     private final LegalAcceptanceService legalAcceptanceService;
+    private final AuthOtpService authOtpService;
 
     public RegistrationService(
             UserRepository userRepository,
@@ -35,7 +36,8 @@ public class RegistrationService {
             UserRoleRepository userRoleRepository,
             PasswordEncoder passwordEncoder,
             PhoneProtectionService phoneProtectionService,
-            LegalAcceptanceService legalAcceptanceService
+            LegalAcceptanceService legalAcceptanceService,
+            AuthOtpService authOtpService
     ) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
@@ -43,12 +45,13 @@ public class RegistrationService {
         this.passwordEncoder = passwordEncoder;
         this.phoneProtectionService = phoneProtectionService;
         this.legalAcceptanceService = legalAcceptanceService;
+        this.authOtpService = authOtpService;
     }
 
     @Transactional
-    public RegisterResponse register(RegisterRequest request) {
+    public OtpChallengeResponse register(RegisterRequest request) {
         rejectAdminRole(request.role());
-        enforceBcryptByteLimit(request.password());
+        enforcePasswordLimits(request.password());
 
         String normalizedEmail = request.email()
                 .trim()
@@ -97,20 +100,14 @@ public class RegistrationService {
                 )
         );
 
-        userRoleRepository.save(
+        userRoleRepository.saveAndFlush(
                 new UserRole(user, role, null)
         );
 
         legalAcceptanceService.recordCurrentDocuments(user);
 
-        return new RegisterResponse(
-                user.getId(),
-                user.getFullName(),
-                user.getEmail(),
-                role.getName(),
-                user.getAccountStatus(),
-                user.getCreatedAt()
-        );
+        // Do not create an authenticated session until the account email OTP succeeds.
+        return authOtpService.startRegistration(user);
     }
 
     private void rejectAdminRole(RoleName role) {
@@ -122,7 +119,13 @@ public class RegistrationService {
         }
     }
 
-    private void enforceBcryptByteLimit(String password) {
+    private void enforcePasswordLimits(String password) {
+        if (password == null || password.isBlank() || password.length() < 8) {
+            throw new RegistrationException(
+                    RegistrationException.Reason.PASSWORD_TOO_SHORT,
+                    "Password must contain at least 8 characters."
+            );
+        }
         int passwordBytes = password
                 .getBytes(StandardCharsets.UTF_8)
                 .length;

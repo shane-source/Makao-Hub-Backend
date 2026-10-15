@@ -88,12 +88,10 @@ public class NavigationService {
                     item(NavigationItemKey.PROFILE, "/profile")
             );
 
-            case ROOMMATE_SEEKER -> List.of(
-                    item(NavigationItemKey.HOME, "/home"),
-                    item(
-                            NavigationItemKey.REQUESTS,
-                            "/requests"
-                    ),
+            case SUBLESSOR -> List.of(
+                    item(NavigationItemKey.DASHBOARD, "/dashboard"),
+                    item(NavigationItemKey.LISTINGS, "/listings"),
+                    item(NavigationItemKey.ROOMMATES, "/roommates"),
                     item(NavigationItemKey.INBOX, "/inbox"),
                     item(NavigationItemKey.PROFILE, "/profile")
             );

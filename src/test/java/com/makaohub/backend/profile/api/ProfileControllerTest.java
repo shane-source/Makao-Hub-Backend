@@ -73,7 +73,8 @@ class ProfileControllerTest {
                         Instant.parse(
                                 "2026-09-28T08:00:00Z"
                         ),
-                        null
+                        null,
+                        com.makaohub.backend.verification.domain.VerificationStatus.NOT_STARTED
                 );
 
         when(profileService.getMyProfile(USER_ID))
@@ -98,6 +99,7 @@ class ProfileControllerTest {
                         .value("LANDLORD"))
                 .andExpect(jsonPath("$.accountStatus")
                         .value("ACTIVE"))
+                .andExpect(jsonPath("$.verificationStatus").value("NOT_STARTED"))
                 .andExpect(jsonPath("$.avatarUrl")
                         .doesNotExist());
 

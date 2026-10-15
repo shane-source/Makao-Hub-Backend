@@ -42,9 +42,9 @@ public class AccessTokenService {
         Objects.requireNonNull(user, "User cannot be null.");
         Objects.requireNonNull(roles, "Roles cannot be null.");
 
-        if (roles.isEmpty()) {
+        if (roles.size() != 1 || user.isRoleSelectionRequired()) {
             throw new IllegalArgumentException(
-                    "An access token requires at least one role."
+                    "An access token requires exactly one selected role."
             );
         }
 
@@ -73,6 +73,7 @@ public class AccessTokenService {
                 .id(UUID.randomUUID().toString())
                 .claim("token_type", "access")
                 .claim("roles", roleClaims)
+                .claim("authorization_version", user.getAuthorizationVersion())
                 .build();
 
         Jwt jwt = jwtEncoder.encode(

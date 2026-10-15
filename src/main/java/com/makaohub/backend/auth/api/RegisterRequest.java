@@ -27,7 +27,7 @@ public record RegisterRequest(
         String phoneNumber,
 
         @NotBlank
-        @Size(min = 12, max = 72)
+        @Size(min = 8, max = 72, message = "Password must be between 8 and 72 characters.")
         String password,
 
         @NotNull

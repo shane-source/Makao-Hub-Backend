@@ -95,8 +95,19 @@ public class LandlordVerificationDocument {
         return status;
     }
 
+    public boolean usesImmutableEvidencePath() {
+        return objectPath.startsWith(landlordId + "/evidence-v1/");
+    }
+
+    public boolean hasCurrentSecurityChecks() {
+        return status == VerificationDocumentStatus.READY && usesImmutableEvidencePath();
+    }
+
     public void markReady(long sizeBytes) {
         this.status = VerificationDocumentStatus.READY;
         this.sizeBytes = sizeBytes;
     }
+
+    /** Preserve the old storage record, but remove it from the active evidence set. */
+    public void supersede() { this.status = VerificationDocumentStatus.DELETED; }
 }

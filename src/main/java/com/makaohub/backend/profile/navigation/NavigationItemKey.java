@@ -7,6 +7,7 @@ public enum NavigationItemKey {
     DASHBOARD,
     LISTINGS,
     REQUESTS,
+    ROOMMATES,
     HOUSE_HUNT,
     INBOX,
     PROFILE

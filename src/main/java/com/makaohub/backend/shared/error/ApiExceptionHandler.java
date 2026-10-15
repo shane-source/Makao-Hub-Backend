@@ -2,6 +2,7 @@ package com.makaohub.backend.shared.error;
 
 import com.makaohub.backend.auth.exception.AuthException;
 import com.makaohub.backend.auth.exception.RegistrationException;
+import com.makaohub.backend.auth.exception.OtpProviderException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -17,6 +18,20 @@ import java.util.Map;
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
+    @ExceptionHandler(OtpProviderException.class)
+    public ResponseEntity<ProblemDetail> handleOtpProviderFailure(OtpProviderException exception) {
+        HttpStatus status = exception.getFailure() == OtpProviderException.Failure.RATE_LIMITED
+                ? HttpStatus.TOO_MANY_REQUESTS : HttpStatus.SERVICE_UNAVAILABLE;
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                status,
+                exception.getFailure().detail()
+        );
+        problem.setTitle(status == HttpStatus.TOO_MANY_REQUESTS
+                ? "Verification limit reached" : "Verification service unavailable");
+        problem.setProperty("code", exception.getFailure().code());
+        return ResponseEntity.status(status).body(problem);
+    }
+
     @ExceptionHandler(AuthException.class)
     public ResponseEntity<ProblemDetail> handleAuthException(
             AuthException exception
@@ -24,10 +39,16 @@ public class ApiExceptionHandler {
         HttpStatus status = switch (exception.getReason()) {
             case INVALID_CREDENTIALS,
                  INVALID_REFRESH_TOKEN,
-                 ACCOUNT_UNAVAILABLE -> HttpStatus.UNAUTHORIZED;
+                 ACCOUNT_UNAVAILABLE,
+                 INVALID_OTP -> HttpStatus.UNAUTHORIZED;
 
-            case GOOGLE_REGISTRATION_REQUIRED ->
+            case OTP_RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
+
+            case GOOGLE_REGISTRATION_REQUIRED,
+                 ROLE_SELECTION_REQUIRED,
+                 ROLE_SELECTION_NOT_REQUIRED ->
                     HttpStatus.CONFLICT;
+            case INVALID_ROLE_SELECTION -> HttpStatus.BAD_REQUEST;
         };
 
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
@@ -56,6 +77,7 @@ public class ApiExceptionHandler {
 
             case ADMIN_ROLE_NOT_ALLOWED,
                  INVALID_PHONE_NUMBER,
+                 PASSWORD_TOO_SHORT,
                  PASSWORD_TOO_LONG -> HttpStatus.BAD_REQUEST;
 
             case ROLE_NOT_CONFIGURED ->
