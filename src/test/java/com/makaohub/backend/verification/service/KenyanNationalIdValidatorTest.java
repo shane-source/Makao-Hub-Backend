@@ -22,6 +22,7 @@ class KenyanNationalIdValidatorTest {
     private static final String FRONT = "REPUBLIC OF KENYA\nSERIAL NUMBER 000000000\nID NUMBER 00000000\nFULL NAMES TEST PERSON\nDATE OF BIRTH 01.01.1990\nSEX FEMALE\nDATE OF ISSUE 01.01.2020";
     private static final String BACK = "DISTRICT TEST\nDIVISION TEST\nLOCATION TEST\nSUB-LOCATION TEST\nPRINCIPAL REGISTRAR SIGN";
     private static final String MAISHA_FRONT = "REPUBLIC OF KENYA\nNATIONAL IDENTITY CARD\nMAISHA NUMBER 000000000\nSURNAME TEST\nGIVEN NAMES PERSON\nNATIONALITY KENYAN\nDATE OF EXPIRY 01.01.2034";
+    private static final String ALTERNATE_KENYAN_FRONT = "JAMHURI YA KENYA\nREPUBLIC OF KENYA\nNATIONAL IDENTITY CARD\nID NUMBER 00000000\nSURNAME TEST\nGIVEN NAME PERSON\nSEX MALE\nNATIONALITY KEN\nDATE OF BIRTH 01.01.1990\nDATE OF ISSUE 01.01.2020";
     private static final String MAISHA_BACK = "IDKEN0000000000<<<<<<<<<<<\n0000000F3401010KEN<<<<<<<<<\nTEST<<PERSON<<<<<<<<<<<<<<<";
     private static final String NOISY_FRONT = "REPUBLIC OF KENYA\n1D NUM8ER 00000000\nFUL NAMES TEST PERSON\nDATE 0F BIRTH 01.01.1990\nS3X FEMALE\nSER1AL NUMBER 000000000\nDATE 0F ISSUE 01.01.2020";
     private static final String HEADER = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n";
@@ -31,6 +32,7 @@ class KenyanNationalIdValidatorTest {
         assertDoesNotThrow(() -> KenyanNationalIdValidator.validateText(FRONT, ID_FRONT));
         assertDoesNotThrow(() -> KenyanNationalIdValidator.validateText(BACK, ID_BACK));
         assertDoesNotThrow(() -> KenyanNationalIdValidator.validateText(MAISHA_FRONT, ID_FRONT));
+        assertDoesNotThrow(() -> KenyanNationalIdValidator.validateText(ALTERNATE_KENYAN_FRONT, ID_FRONT));
         assertDoesNotThrow(() -> KenyanNationalIdValidator.validateText(MAISHA_BACK, ID_BACK));
         assertDoesNotThrow(() -> KenyanNationalIdValidator.validateText(NOISY_FRONT, ID_FRONT));
         for (String unrelated : List.of("", "ID", "Invoice KENYA 12345678", "Lease agreement",

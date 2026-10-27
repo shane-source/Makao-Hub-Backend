@@ -270,7 +270,16 @@ public class KenyanNationalIdValidator {
                 && hasAny(text, "GIVEN NAME", "GIVEN NAMES")
                 && has(text, "NATIONALITY")
                 && hasAny(text, "DATE OF EXPIRY", "EXPIRY DATE");
-        boolean front = kenya && NUMBER.matcher(text).find() && (legacyFront || maishaFront);
+        // Another Kenyan card layout uses an explicit card heading and separate name fields,
+        // but does not print the Maisha label or expiry field required by maishaFront.
+        boolean nationalIdentityCardFront = hasAny(text, "NATIONAL IDENTITY CARD", "NATIONAL ID CARD")
+                && legacyIdLabel
+                && hasAny(text, "SURNAME", "FULL NAMES", "FULL NAME")
+                && hasAny(text, "GIVEN NAME", "GIVEN NAMES")
+                && hasAny(text, "SEX", "GENDER")
+                && hasAny(text, "DATE OF BIRTH", "DATE OF ISSUE", "DATE OF EXPIRY");
+        boolean front = kenya && NUMBER.matcher(text).find()
+                && (legacyFront || maishaFront || nationalIdentityCardFront);
 
         boolean legacyBack = hasAny(text, "DISTRICT", "DISTRICT OF BIRTH")
                 && has(text, "DIVISION")

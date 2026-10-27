@@ -23,12 +23,15 @@ issue-date and district labels. Similar birth/issue phrases cannot count twice u
 both distinguishing words are present. Limited edit-distance tolerance applies only to these known
 labels so ordinary OCR character substitutions do not reject an otherwise readable ID.
 A Maisha-style front requires its Maisha label, name fields, nationality and expiry
-label. An older-format back requires district, division, location, sub-location and
-issue/registrar labels; a Kenyan ICAO-style machine-readable zone is the alternative
-back signal. These are conservative application screening rules, **not** an official
-specification of all Kenyan IDs. Coverage, orientation, glare, language and
-acceptance accuracy still need validation against lawfully obtained, consented
-examples before rollout. Passports and other identity documents are not supported.
+label. An alternate national-identity-card front layout is screened using its card
+heading, ID-number label, surname/given-name labels, sex/gender label, and at least
+one date label. An older-format back requires district, division, location,
+sub-location and issue/registrar labels; a Kenyan ICAO-style machine-readable zone is
+the alternative back signal. These are conservative application screening rules,
+**not** an official specification of all Kenyan IDs. Coverage, orientation, glare,
+language and acceptance accuracy still need validation against lawfully obtained,
+consented examples before rollout. Passports and other identity documents are not
+supported.
 
 The [Kenyan Embassy's information and samples](https://kenyaembassydc.org/idprep/)
 and [NRB's Maisha information](https://www.usajili.go.ke/nrb) show why card
