@@ -1,6 +1,7 @@
 package com.makaohub.backend.renter.service;
 
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -18,9 +19,13 @@ public class BookingDepositPricingService {
         this.environment = environment;
     }
 
-    public long depositAmountMinor() {
+    public long depositAmountMinor(long monthlyRentKes) {
         String raw = environment.getProperty(DEPOSIT_KEY);
         if (raw == null || raw.isBlank()) {
+            if (environment.acceptsProfiles(Profiles.of("mock"))) {
+                // Test-only convention used by the renter reference screens; live profiles still require explicit pricing.
+                return Math.multiplyExact(monthlyRentKes, 100);
+            }
             throw new ResponseStatusException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "Booking deposit pricing is not configured."

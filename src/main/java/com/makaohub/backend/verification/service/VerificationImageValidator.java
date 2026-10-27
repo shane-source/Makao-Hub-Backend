@@ -1,5 +1,6 @@
 package com.makaohub.backend.verification.service;
 
+import com.makaohub.backend.verification.domain.VerificationDocumentType;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -17,9 +18,15 @@ import java.io.IOException;
 @Service
 public class VerificationImageValidator {
     private final ClamAvScanner scanner;
-    public VerificationImageValidator(ClamAvScanner scanner) { this.scanner = scanner; }
+    private final KenyanNationalIdValidator nationalId;
+    public VerificationImageValidator(ClamAvScanner scanner, KenyanNationalIdValidator nationalId) {
+        this.scanner = scanner;
+        this.nationalId = nationalId;
+    }
 
-    public byte[] prepare(byte[] bytes, String contentType) {
+    public byte[] prepare(byte[] bytes, String contentType, VerificationDocumentType documentType) {
+        if (documentType != VerificationDocumentType.ID_FRONT && documentType != VerificationDocumentType.ID_BACK
+                && documentType != VerificationDocumentType.SELFIE) throw invalid();
         if (bytes == null || bytes.length == 0 || bytes.length > 10_485_760) throw invalid();
         String format = switch (contentType) {
             case "image/jpeg" -> "JPEG";
@@ -60,7 +67,15 @@ public class VerificationImageValidator {
                         imageOutput.flush();
                     } finally { writer.dispose(); }
                     if (output.size() == 0 || output.size() > 10_485_760) throw invalid();
-                    return output.toByteArray(); // No source metadata is passed to the writer.
+                    byte[] prepared = output.toByteArray(); // No source metadata is passed to the writer.
+                    try {
+                        if (documentType != VerificationDocumentType.SELFIE)
+                            nationalId.validate(prepared, documentType);
+                        return prepared;
+                    } catch (RuntimeException failure) {
+                        java.util.Arrays.fill(prepared, (byte) 0);
+                        throw failure;
+                    }
                 } finally { decoded.flush(); normalized.flush(); }
             } finally { reader.dispose(); }
         } catch (IOException | IllegalArgumentException failure) { throw invalid(); }

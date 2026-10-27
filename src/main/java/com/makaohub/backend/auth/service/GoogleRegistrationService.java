@@ -69,21 +69,17 @@ public class GoogleRegistrationService {
             );
         }
 
-        String normalizedPhone =
-                KenyanPhoneNumberNormalizer.normalize(
-                        request.phoneNumber()
+        // Google does not provide a phone number. Legacy clients may still send one.
+        PhoneProtectionService.ProtectedPhone protectedPhone = null;
+        if (request.phoneNumber() != null && !request.phoneNumber().isBlank()) {
+            String normalizedPhone = KenyanPhoneNumberNormalizer.normalize(request.phoneNumber());
+            protectedPhone = phoneProtectionService.protect(normalizedPhone);
+            if (userRepository.existsByPhoneLookupHash(protectedPhone.lookupHash())) {
+                throw new RegistrationException(
+                        RegistrationException.Reason.PHONE_ALREADY_REGISTERED,
+                        "An account already exists for this phone number."
                 );
-
-        PhoneProtectionService.ProtectedPhone protectedPhone =
-                phoneProtectionService.protect(normalizedPhone);
-
-        if (userRepository.existsByPhoneLookupHash(
-                protectedPhone.lookupHash()
-        )) {
-            throw new RegistrationException(
-                    RegistrationException.Reason.PHONE_ALREADY_REGISTERED,
-                    "An account already exists for this phone number."
-            );
+            }
         }
 
         Role role = roleRepository.findByName(request.role())
@@ -92,12 +88,23 @@ public class GoogleRegistrationService {
                         "The selected role is not configured."
                 ));
 
+        String fullName = request.fullName() == null || request.fullName().isBlank()
+                ? googleIdentity.fullName()
+                : request.fullName().strip();
+        if (fullName != null) fullName = fullName.strip();
+        if (fullName == null || fullName.length() < 2 || fullName.length() > 150) {
+            throw new RegistrationException(
+                    RegistrationException.Reason.INVALID_FULL_NAME,
+                    "Google did not provide a usable name. Enter your full name to continue."
+            );
+        }
+
         User user = userRepository.saveAndFlush(
                 new User(
-                        request.fullName(),
+                        fullName,
                         googleIdentity.email(),
-                        protectedPhone.ciphertext(),
-                        protectedPhone.lookupHash()
+                        protectedPhone == null ? null : protectedPhone.ciphertext(),
+                        protectedPhone == null ? null : protectedPhone.lookupHash()
                 )
         );
 

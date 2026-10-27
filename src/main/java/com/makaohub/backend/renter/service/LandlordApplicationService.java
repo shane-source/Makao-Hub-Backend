@@ -98,14 +98,15 @@ public class LandlordApplicationService {
     @Transactional
     public RentalApplicationResponse reject(
             UUID landlordId,
-            UUID applicationId
+            UUID applicationId,
+            String reason
     ) {
         RentalApplication application =
                 findOwnedApplication(landlordId, applicationId);
 
         try {
-            application.reject();
-        } catch (IllegalStateException exception) {
+            application.reject(reason);
+        } catch (IllegalStateException | IllegalArgumentException exception) {
             throw conflict(exception.getMessage());
         }
 
@@ -144,7 +145,8 @@ public class LandlordApplicationService {
                 application.getListingId(),
                 application.getStatus(),
                 application.getCreatedAt(),
-                application.getUpdatedAt()
+                application.getUpdatedAt(),
+                application.getRejectionReason()
         );
     }
 

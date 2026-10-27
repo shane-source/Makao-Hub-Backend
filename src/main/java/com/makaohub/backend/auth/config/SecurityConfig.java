@@ -1,6 +1,10 @@
 package com.makaohub.backend.auth.config;
 
 import com.makaohub.backend.storage.config.UploadSecurityProperties;
+import com.makaohub.backend.admin.StaffAccessService;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.security.authorization.AuthorizationDecision;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -69,7 +73,8 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             JwtAuthenticationConverter authenticationConverter,
-            UploadSecurityProperties uploadSecurityProperties
+            UploadSecurityProperties uploadSecurityProperties,
+            ObjectProvider<StaffAccessService> staffAccess
     ) throws Exception {
         return http
                 /*
@@ -144,7 +149,13 @@ public class SecurityConfig {
                                 "/api/v1/auth/login/verify-otp",
                                 "/api/v1/auth/google/verify-otp",
                                 "/api/v1/auth/forgot-password",
-                                "/api/v1/auth/forgot-password/reset"
+                                "/api/v1/auth/forgot-password/reset",
+                                "/api/v1/staff/auth/login",
+                                "/api/v1/staff/auth/verify-otp",
+                                "/api/v1/staff/auth/refresh",
+                                "/api/v1/staff/auth/accept-invitation",
+                                "/api/v1/staff/auth/forgot-password",
+                                "/api/v1/staff/auth/reset-password"
                         ).permitAll()
 
                         /*
@@ -176,8 +187,15 @@ public class SecurityConfig {
                          * The service still performs its own active-account
                          * and ownership/state checks.
                          */
+                        // Financial mutations remain blocked until their rules and approvals are defined.
+                        .requestMatchers(HttpMethod.POST,"/api/v1/admin/payments/**").denyAll()
                         .requestMatchers("/api/v1/admin/**")
-                        .hasRole("ADMIN")
+                        .access((authentication,context) -> {
+                            var guard=staffAccess.getIfAvailable();
+                            var principal=authentication.get();
+                            return new AuthorizationDecision(guard!=null && principal instanceof JwtAuthenticationToken token
+                                    && guard.allows(token.getToken()));
+                        })
 
                         /*
                          * Every endpoint not explicitly public still

@@ -101,6 +101,50 @@ class RoleMigrationIntegrationTest {
         sql.update("INSERT INTO user_roles (user_id, role_id) SELECT ?, id FROM roles WHERE name = ?", id, role);
     }
 
+    @Test void passwordAndGoogleLoginOnlyAcceptTheStoredRoleWithoutMutatingIt() {
+        var tokenIssuer = mock(AuthenticationTokenService.class);
+        var encoder = mock(PasswordEncoder.class);
+        when(encoder.matches("correct-password", "synthetic-hash")).thenReturn(true);
+        var passwordLogin = new PasswordAuthenticationService(users, encoder, tokenIssuer, selection);
+        var verifier = mock(GoogleIdTokenVerifier.class);
+        var identities = mock(GoogleIdentityRepository.class);
+        var googleLogin = new GoogleAuthenticationService(verifier, identities, tokenIssuer, selection);
+        for (RoleName stored : List.of(RoleName.LANDLORD, RoleName.SUBLESSOR, RoleName.RENTER)) {
+            UUID id = UUID.randomUUID();
+            insertUser(id, stored.name(), "ACTIVE");
+            for (RoleName expected : RoleName.values()) {
+                tx.executeWithoutResult(status -> {
+                    User account = users.findById(id).orElseThrow();
+                    when(verifier.verify("synthetic-token")).thenReturn(
+                            new GoogleIdTokenVerifier.VerifiedGoogleIdentity("synthetic-subject", id+"@example.invalid", "Synthetic"));
+                    when(identities.findByGoogleSubject("synthetic-subject"))
+                            .thenReturn(Optional.of(new GoogleIdentity(account, "synthetic-subject")));
+                    var request = new com.makaohub.backend.auth.api.LoginRequest(id+"@example.invalid", "correct-password", expected);
+                    if (stored == expected) {
+                        assertEquals(id, passwordLogin.verifyCredentials(request).getId());
+                        assertEquals(id, googleLogin.verifyIdentity("synthetic-token", expected).getId());
+                    } else {
+                        assertEquals(AuthException.Reason.ROLE_MISMATCH,
+                                assertThrows(AuthException.class, () -> passwordLogin.verifyCredentials(request)).getReason());
+                        assertEquals(AuthException.Reason.ROLE_MISMATCH,
+                                assertThrows(AuthException.class, () -> googleLogin.verifyIdentity("synthetic-token", expected)).getReason());
+                    }
+                    assertEquals(stored, userRoles.findAllByUser_Id(id).getFirst().getRole().getName());
+                    assertEquals(0L, account.getAuthorizationVersion());
+                    assertEquals(VerificationStatus.NOT_STARTED,
+                            verifications.findByUserIdAndRole(id, stored).orElseThrow().getStatus());
+                    assertEquals(AuthException.Reason.INVALID_CREDENTIALS, assertThrows(AuthException.class,
+                            () -> passwordLogin.verifyCredentials(new com.makaohub.backend.auth.api.LoginRequest(
+                                    id+"@example.invalid", "wrong-password", expected))).getReason());
+                });
+            }
+            assertEquals(1, sql.queryForObject("SELECT count(*) FROM role_verifications WHERE user_id=?", Integer.class, id));
+            assertEquals(0, sql.queryForObject("SELECT count(*) FROM auth_otp_challenges WHERE user_id=?", Integer.class, id));
+            assertEquals(0, sql.queryForObject("SELECT count(*) FROM refresh_tokens WHERE user_id=?", Integer.class, id));
+        }
+        verifyNoInteractions(tokenIssuer);
+    }
+
     @AfterAll
     void closeDatabase() {
         if (factoryBean != null) factoryBean.destroy();
@@ -108,6 +152,26 @@ class RoleMigrationIntegrationTest {
             // Only this test's random schema is removed, never public or a caller-provided schema.
             new JdbcTemplate(dataSource).execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
         }
+    }
+
+    @Test void phoneOptionalSchemaSupportsGoogleAccountsAndPreservesExistingPhones() {
+        for (int i = 0; i < 2; i++) {
+            UUID id = tx.execute(status -> users.saveAndFlush(new User(
+                    "Synthetic Google Account", UUID.randomUUID() + "@example.invalid", null, null)).getId());
+            tx.executeWithoutResult(status -> {
+                User user = users.findById(id).orElseThrow();
+                assertNull(user.getPhoneCiphertext());
+                assertNull(user.getPhoneLookupHash());
+            });
+        }
+        assertArrayEquals(new byte[]{1}, sql.queryForObject(
+                "SELECT phone_ciphertext FROM users WHERE id=?", byte[].class, landlord));
+        assertEquals(landlord.toString(), sql.queryForObject(
+                "SELECT phone_lookup_hash FROM users WHERE id=?", String.class, landlord));
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () -> sql.update("""
+                INSERT INTO users(id,full_name,email,phone_ciphertext,account_status)
+                VALUES(?,'Synthetic',?,?,'ACTIVE')
+                """, UUID.randomUUID(), UUID.randomUUID()+"@example.invalid", new byte[]{1}));
     }
 
     @Test void migrationPreservesAccountsAndRequiresAnExplicitChoice() {
@@ -299,6 +363,14 @@ class RoleMigrationIntegrationTest {
         assertEquals(VerificationStatus.NOT_STARTED, tx.execute(status -> verifications.findByUserIdAndRole(owner, RoleName.LANDLORD).orElseThrow().getStatus()));
         assertThrows(org.springframework.dao.DataIntegrityViolationException.class,
                 () -> sql.update("UPDATE auth_otp_challenges SET code_digest = 'plaintext' WHERE id = ?", id));
+
+        // A login challenge must not survive an authorization change while the email is in flight.
+        UUID staleId = tx.execute(status -> service.startLogin(users.findById(owner).orElseThrow()).challengeId());
+        String staleCode = sentCode.get();
+        tx.executeWithoutResult(status -> users.findById(owner).orElseThrow().invalidateAuthorization());
+        tx.executeWithoutResult(status -> assertEquals(AuthException.Reason.INVALID_OTP,
+                assertThrows(AuthException.class, () -> service.verifyLogin(staleId, staleCode)).getReason()));
+        verify(tokens, times(1)).issue(any());
     }
 
     @Test void landlordReadinessQueryCannotReturnAnotherOwnersDocuments() {

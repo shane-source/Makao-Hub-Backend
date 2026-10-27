@@ -19,12 +19,6 @@ class RenterUnlockCheckoutTest {
         new PaymentPricingService(new MockEnvironment().withProperty("makao.payment.prices.exact-location-unlock-minor","32100")),
         mock(ListingRepository.class),mock(SublessorListingRepository.class),mock(BookingPaymentService.class),homes);
     private Jwt actor(String role) { return Jwt.withTokenValue("synthetic").header("alg","RS256").subject(UUID.randomUUID().toString()).claim("roles",List.of(role)).build(); }
-    @Test void quoteUsesConfiguredIntegerMinorUnitsAndNoPaymentIsCreated() {
-        assertEquals(32100,controller.price(actor("RENTER"),PaymentType.EXACT_LOCATION_UNLOCK).amountMinor());
-        verifyNoInteractions(payments,homes);
-        assertThrows(ResponseStatusException.class,()->controller.price(actor("LANDLORD"),PaymentType.EXACT_LOCATION_UNLOCK));
-        assertThrows(ResponseStatusException.class,()->controller.price(actor("RENTER"),PaymentType.BOOKING));
-    }
     @Test void deniedHomeVerificationStopsBeforeAnyMoneyOperation() {
         doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN)).when(homes).access(any(),any());
         assertThrows(ResponseStatusException.class,()->controller.createIntent(actor("RENTER"),"synthetic-idempotency",

@@ -67,6 +67,20 @@ public class LandlordListingMediaController {
         );
     }
 
+    @DeleteMapping("/{listingId}/media/{mediaId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteMedia(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID listingId,
+            @PathVariable UUID mediaId
+    ) {
+        mediaService.deleteMedia(
+                extractUserId(jwt),
+                listingId,
+                mediaId
+        );
+    }
+
 
     private UUID extractUserId(Jwt jwt) {
         String subject = jwt.getSubject();

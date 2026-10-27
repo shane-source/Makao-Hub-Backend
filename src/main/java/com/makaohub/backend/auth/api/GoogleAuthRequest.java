@@ -1,5 +1,6 @@
 package com.makaohub.backend.auth.api;
 
+import com.makaohub.backend.auth.domain.RoleName;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -10,7 +11,9 @@ public record GoogleAuthRequest(
                 max = 8192,
                 message = "Google ID token is too large."
         )
-        String idToken
+        String idToken,
+
+        RoleName expectedRole
 
 ) {
 }

@@ -82,9 +82,13 @@ public class RenterListingPhoneAccessService {
         if (owner.getAccountStatus() != AccountStatus.ACTIVE) {
             throw new ResponseStatusException(HttpStatus.GONE, "Listing owner is unavailable.");
         }
+        byte[] encryptedPhone = owner.getPhoneCiphertext();
+        if (encryptedPhone == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "The listing owner has no phone number available.");
+        }
         return new ListingOwnerPhoneResponse(
                 owner.getFullName(),
-                phoneProtectionService.decrypt(owner.getPhoneCiphertext())
+                phoneProtectionService.decrypt(encryptedPhone)
         );
     }
 

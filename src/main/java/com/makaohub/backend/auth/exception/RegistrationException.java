@@ -16,6 +16,7 @@ public class RegistrationException extends RuntimeException {
     public enum Reason {
         EMAIL_ALREADY_REGISTERED,
         PHONE_ALREADY_REGISTERED,
+        INVALID_FULL_NAME,
         ADMIN_ROLE_NOT_ALLOWED,
         INVALID_PHONE_NUMBER,
         PASSWORD_TOO_SHORT,

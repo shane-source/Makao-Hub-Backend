@@ -30,6 +30,11 @@ public class SublessorHouseholdService {
             rs.getObject("people_per_room", Integer.class), rs.getString("lifestyle"), parse(rs.getString("amenities"))), listing)
             .stream().findFirst().orElse(new Household(null,null,null,null,null,Set.of()));
     }
+    /** BookingCreationService calls this after it has verified the published listing and renter application. */
+    @Transactional(readOnly=true) public Long depositKesForBooking(UUID listing) {
+        return jdbc.query("SELECT deposit_kes FROM sublessor_household_details WHERE listing_id=?", rs ->
+            rs.next() ? rs.getObject("deposit_kes", Long.class) : null, listing);
+    }
     @Transactional public Household save(UUID actor, UUID listing, Household body) {
         if (!"DRAFT".equals(owned(actor, listing, true))) throw new ResponseStatusException(HttpStatus.CONFLICT, "Only drafts can be edited.");
         jdbc.update("""

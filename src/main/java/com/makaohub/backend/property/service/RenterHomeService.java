@@ -48,10 +48,12 @@ public class RenterHomeService {
             rs.getString("area_label"),rs.getBigDecimal("approximate_latitude"),rs.getBigDecimal("approximate_longitude"),rs.getShort("approximate_radius_meters"));
     }
     @Transactional(readOnly=true)
-    public HomePage search(UUID actor, int page, int size, String area, Long min, Long max, String source, Integer bedrooms, Boolean furnished, boolean saved) {
+    public HomePage search(UUID actor, int page, int size, String area, Long min, Long max, String source, Integer bedrooms, Boolean furnished,
+                           String propertyType, LocalDate availableBy, boolean saved) {
         actor(actor);
         if(page<0 || page>10000 || size<1 || size>50 || area!=null && area.length()>150 || min!=null && min<0 ||
-           max!=null && max<0 || min!=null && max!=null && min>max || bedrooms!=null && (bedrooms<0 || bedrooms>20))
+           max!=null && max<0 || min!=null && max!=null && min>max || bedrooms!=null && (bedrooms<0 || bedrooms>20) ||
+           propertyType!=null && !Set.of("APARTMENT","HOUSE","STUDIO","BEDSITTER","ROOM","SPARE_ROOM","SERVANT_QUARTER").contains(propertyType))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid filters.");
         var sql = new StringBuilder("SELECT h.* FROM ").append(HOMES).append(" WHERE TRUE");
         var args = new ArrayList<Object>();
@@ -61,6 +63,8 @@ public class RenterHomeService {
         if(source!=null && !source.isBlank()) { source(source); sql.append(" AND h.source=?"); args.add(source); }
         if(bedrooms!=null) { sql.append(" AND h.bedroom_count>=?"); args.add(bedrooms); }
         if(furnished!=null) { sql.append(" AND h.furnished=?"); args.add(furnished); }
+        if(propertyType!=null) { sql.append(" AND h.property_type=?"); args.add(propertyType); }
+        if(availableBy!=null) { sql.append(" AND h.available_from IS NOT NULL AND h.available_from<=?"); args.add(availableBy); }
         if(saved) { sql.append(" AND (EXISTS(SELECT 1 FROM renter_saved_homes s WHERE s.renter_id=? AND s.source=h.source AND s.listing_id=h.id) OR (h.source='LANDLORD' AND EXISTS(SELECT 1 FROM saved_listings s WHERE s.user_id=? AND s.listing_id=h.id)))"); args.add(actor); args.add(actor); }
         sql.append(" ORDER BY h.updated_at DESC,h.source,h.id LIMIT ? OFFSET ?"); args.add(size+1); args.add((long)page*size);
         var rows = jdbc.query(sql.toString(),this::map,args.toArray());

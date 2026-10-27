@@ -8,7 +8,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
 
-/** Reads server-owned test prices; clients never submit payment amounts. */
+/** Reads server-owned prices; clients never submit payment amounts. */
 @Service
 public class PaymentPricingService {
 
@@ -38,7 +38,7 @@ public class PaymentPricingService {
         if (key == null) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
-                    "This payment type is not available in the mock flow."
+                    "This payment type does not use a configured fixed price."
             );
         }
 

@@ -1,0 +1,7 @@
+makao:
+  payment:
+    prices:
+      # Screenshot example prices, in KES minor units; mock profile only.
+      exact-location-unlock-minor: ${MAKAO_EXACT_LOCATION_UNLOCK_MINOR:20000}
+      video-unlock-minor: ${MAKAO_VIDEO_UNLOCK_MINOR:10000}
+      phone-unlock-minor: ${MAKAO_PHONE_UNLOCK_MINOR:10000}

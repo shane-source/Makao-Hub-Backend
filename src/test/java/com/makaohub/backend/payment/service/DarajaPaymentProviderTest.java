@@ -35,6 +35,19 @@ class DarajaPaymentProviderTest {
     private DarajaStkPushClient stkPushClient;
 
     @Test
+    void noPhoneMeansNoStkPush() {
+        UUID payerId = UUID.randomUUID();
+        User payer = new User("Synthetic", "synthetic@example.invalid", null, null);
+        when(userRepository.findById(payerId)).thenReturn(Optional.of(payer));
+        PaymentIntent intent = new PaymentIntent(payerId, PaymentType.PLAN_UPGRADE,
+                null, null, PaymentTargetKind.NONE, 500, PaymentIntent.KES, "synthetic-no-phone");
+        var failure = assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> new DarajaPaymentProvider(userRepository, phoneProtectionService, stkPushClient).start(intent));
+        assertEquals(409, failure.getStatusCode().value());
+        org.mockito.Mockito.verifyNoInteractions(phoneProtectionService, stkPushClient);
+    }
+
+    @Test
     void decryptsThePayerPhoneOnlyToStartTheProviderRequest() {
         UUID payerId = UUID.randomUUID();
         byte[] protectedPhone = new byte[]{1, 2, 3};

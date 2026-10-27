@@ -3,6 +3,7 @@ package com.makaohub.backend.auth.service;
 import com.makaohub.backend.auth.api.AuthTokensResponse;
 import com.makaohub.backend.auth.domain.AccountStatus;
 import com.makaohub.backend.auth.domain.GoogleIdentity;
+import com.makaohub.backend.auth.domain.RoleName;
 import com.makaohub.backend.auth.domain.User;
 import com.makaohub.backend.auth.exception.AuthException;
 import com.makaohub.backend.auth.repository.GoogleIdentityRepository;
@@ -37,6 +38,11 @@ public class GoogleAuthenticationService {
 
     @Transactional
     public User verifyIdentity(String idToken) {
+        return verifyIdentity(idToken, null);
+    }
+
+    @Transactional
+    public User verifyIdentity(String idToken, RoleName expectedRole) {
         GoogleIdTokenVerifier.VerifiedGoogleIdentity googleIdentity;
 
         try {
@@ -65,11 +71,8 @@ public class GoogleAuthenticationService {
             );
         }
 
-        /*
-         * The role is not taken from Google request data.
-         * This only checks that the account has completed role selection.
-         */
-        roleSelectionService.resolve(user, null);
+        // Verified Google identity first; the selected role can only constrain login, not grant a role.
+        roleSelectionService.resolveForLogin(user, expectedRole);
 
         /*
          * AuthenticationTokenService loads the stored role from the

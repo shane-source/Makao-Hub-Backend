@@ -10,6 +10,7 @@ import com.makaohub.backend.property.api.CreateListingDraftRequest;
 import com.makaohub.backend.property.api.LandlordDashboardResponse;
 import com.makaohub.backend.property.api.ListingResponse;
 import com.makaohub.backend.property.domain.Listing;
+import com.makaohub.backend.property.domain.ListingMedia;
 import com.makaohub.backend.property.domain.ListingMediaType;
 import com.makaohub.backend.property.domain.ListingStatus;
 import com.makaohub.backend.property.repository.ListingLocationRepository;
@@ -18,6 +19,7 @@ import com.makaohub.backend.property.repository.ListingRepository;
 import com.makaohub.backend.verification.domain.RoleVerification;
 import com.makaohub.backend.verification.domain.VerificationStatus;
 import com.makaohub.backend.verification.repository.RoleVerificationRepository;
+import com.makaohub.backend.storage.service.SupabaseStorageClient;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +37,7 @@ public class LandlordListingService {
     private final ListingLocationRepository locationRepository;
     private final ListingMediaRepository mediaRepository;
     private final RoleVerificationRepository verificationRepository;
+    private final SupabaseStorageClient storageClient;
 
     public LandlordListingService(
             UserRepository userRepository,
@@ -42,7 +45,8 @@ public class LandlordListingService {
             ListingRepository listingRepository,
             ListingLocationRepository locationRepository,
             ListingMediaRepository mediaRepository,
-            RoleVerificationRepository verificationRepository
+            RoleVerificationRepository verificationRepository,
+            SupabaseStorageClient storageClient
     ) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
@@ -50,6 +54,7 @@ public class LandlordListingService {
         this.locationRepository = locationRepository;
         this.mediaRepository = mediaRepository;
         this.verificationRepository = verificationRepository;
+        this.storageClient = storageClient;
     }
 
     @Transactional
@@ -68,7 +73,13 @@ public class LandlordListingService {
                 request.bedroomCount(),
                 request.bathroomCount(),
                 request.furnished(),
-                request.availableFrom()
+                request.availableFrom(),
+                request.depositKes(),
+                request.waterAvailable(),
+                request.securityAvailable(),
+                request.parkingAvailable(),
+                request.balcony(),
+                request.petsAllowed()
         );
 
         return toResponse(listingRepository.save(listing));
@@ -149,10 +160,52 @@ public class LandlordListingService {
                 request.bedroomCount(),
                 request.bathroomCount(),
                 request.furnished(),
-                request.availableFrom()
+                request.availableFrom(),
+                request.depositKes(),
+                request.waterAvailable(),
+                request.securityAvailable(),
+                request.parkingAvailable(),
+                request.balcony(),
+                request.petsAllowed()
         );
 
         return toResponse(listing);
+    }
+
+    /**
+     * Permanently removes an owned draft and its private media objects.
+     * Non-draft listings must use the existing lifecycle actions so a
+     * published or reviewed record cannot disappear through this endpoint.
+     */
+    @Transactional
+    public void deleteDraft(
+            UUID authenticatedUserId,
+            UUID listingId
+    ) {
+        requireActiveLandlord(authenticatedUserId);
+
+        Listing listing = listingRepository
+                .findByIdAndLandlordId(
+                        listingId,
+                        authenticatedUserId
+                )
+                .orElseThrow(LandlordListingService::listingNotFound);
+
+        if (listing.getStatus() != ListingStatus.DRAFT) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Only draft listings can be deleted."
+            );
+        }
+
+        List<ListingMedia> media = mediaRepository
+                .findAllByListingIdOrderBySortOrderAsc(listingId);
+
+        for (ListingMedia item : media) {
+            storageClient.deleteListingMedia(item.getObjectPath());
+        }
+
+        listingRepository.delete(listing);
     }
 
     @Transactional
@@ -331,7 +384,13 @@ public class LandlordListingService {
                 listing.getAvailableFrom(),
                 listing.getStatus(),
                 listing.getCreatedAt(),
-                listing.getUpdatedAt()
+                listing.getUpdatedAt(),
+                listing.getDepositKes(),
+                listing.getWaterAvailable(),
+                listing.getSecurityAvailable(),
+                listing.getParkingAvailable(),
+                listing.getBalcony(),
+                listing.getPetsAllowed()
         );
     }
 

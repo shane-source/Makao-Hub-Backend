@@ -9,6 +9,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestBody;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 import java.util.List;
 import java.util.UUID;
@@ -16,6 +20,13 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/landlord/applications")
 public class LandlordApplicationController {
+
+    public record Rejection(
+            @NotBlank(message = "A rejection reason is required.")
+            @Size(max = 500, message = "The rejection reason must not exceed 500 characters.")
+            String reason
+    ) {
+    }
 
     private final LandlordApplicationService applicationService;
 
@@ -59,11 +70,13 @@ public class LandlordApplicationController {
     @PostMapping("/{applicationId}/reject")
     public RentalApplicationResponse reject(
             @AuthenticationPrincipal Jwt jwt,
-            @PathVariable UUID applicationId
+            @PathVariable UUID applicationId,
+            @Valid @RequestBody Rejection request
     ) {
         return applicationService.reject(
                 extractUserId(jwt),
-                applicationId
+                applicationId,
+                request.reason()
         );
     }
 

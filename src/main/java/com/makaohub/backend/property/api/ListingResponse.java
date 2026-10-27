@@ -19,6 +19,12 @@ public record ListingResponse(
         LocalDate availableFrom,
         ListingStatus status,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        Long depositKes,
+        Boolean waterAvailable,
+        Boolean securityAvailable,
+        Boolean parkingAvailable,
+        Boolean balcony,
+        Boolean petsAllowed
 ) {
 }

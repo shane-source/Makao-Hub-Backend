@@ -72,9 +72,8 @@ public class ProfileService {
                 .getRole()
                 .getName();
 
-        String phoneNumber = phoneProtectionService.decrypt(
-                user.getPhoneCiphertext()
-        );
+        byte[] encryptedPhone = user.getPhoneCiphertext();
+        String phoneNumber = encryptedPhone == null ? null : phoneProtectionService.decrypt(encryptedPhone);
 
         String avatarUrl = user.getAvatarObjectPath() == null
                 ? null

@@ -57,7 +57,11 @@ logging:
 
 security:
   verification:
-    clamav-socket-path: ${CLAMAV_SOCKET_PATH:}
+    # Debian/Ubuntu's clamd package exposes this local Unix socket by default.
+    # Deployments with a different path must set CLAMAV_SOCKET_PATH; if the
+    # socket is absent or unreachable, document confirmation still fails closed.
+    clamav-socket-path: ${CLAMAV_SOCKET_PATH:/var/run/clamav/clamd.ctl}
+    tesseract-path: ${TESSERACT_PATH:/usr/bin/tesseract}
 
   phone:
     encryption-key: ${PHONE_ENCRYPTION_KEY}
@@ -122,4 +126,10 @@ makao:
     secret-key: ${MAKAO_PAYSTACK_SECRET_KEY:}
   payment:
     prices:
+      exact-location-unlock-minor: ${MAKAO_EXACT_LOCATION_UNLOCK_MINOR:}
+      video-unlock-minor: ${MAKAO_VIDEO_UNLOCK_MINOR:}
+      phone-unlock-minor: ${MAKAO_PHONE_UNLOCK_MINOR:}
+      plan-upgrade-minor: ${MAKAO_PLAN_UPGRADE_MINOR:}
+      boost-minor: ${MAKAO_BOOST_MINOR:}
+      listing-add-on-minor: ${MAKAO_LISTING_ADD_ON_MINOR:}
       booking-deposit-minor: ${MAKAO_BOOKING_DEPOSIT_MINOR:}

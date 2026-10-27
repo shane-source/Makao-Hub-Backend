@@ -6,6 +6,8 @@ import com.makaohub.backend.payment.daraja.client.DarajaStkPushClient;
 import com.makaohub.backend.payment.domain.PaymentIntent;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -40,8 +42,13 @@ public class DarajaPaymentProvider implements PaymentProvider {
 
         // Decryption is kept inside this provider boundary. The plaintext phone
         // is passed directly to Daraja and is never persisted or logged here.
+        byte[] encryptedPhone = payer.getPhoneCiphertext();
+        if (encryptedPhone == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "A payment phone number is required before starting M-Pesa checkout.");
+        }
         String phoneNumber = phoneProtectionService.decrypt(
-                payer.getPhoneCiphertext()
+                encryptedPhone
         );
 
         String accountReference = "MH-"

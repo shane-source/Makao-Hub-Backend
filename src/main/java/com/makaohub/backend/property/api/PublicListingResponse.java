@@ -30,6 +30,18 @@ public record PublicListingResponse(
 
         ListingStatus status,
 
+        Long depositKes,
+
+        Boolean waterAvailable,
+
+        Boolean securityAvailable,
+
+        Boolean parkingAvailable,
+
+        Boolean balcony,
+
+        Boolean petsAllowed,
+
         String areaLabel,
 
         BigDecimal approximateLatitude,

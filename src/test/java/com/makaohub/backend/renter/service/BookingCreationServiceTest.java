@@ -9,6 +9,7 @@ import com.makaohub.backend.property.domain.ListingStatus;
 import com.makaohub.backend.property.domain.PropertyType;
 import com.makaohub.backend.property.repository.ListingRepository;
 import com.makaohub.backend.property.repository.SublessorListingRepository;
+import com.makaohub.backend.property.service.SublessorHouseholdService;
 import com.makaohub.backend.renter.domain.Booking;
 import com.makaohub.backend.renter.domain.RentalApplication;
 import com.makaohub.backend.renter.repository.BookingRepository;
@@ -28,6 +29,8 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
@@ -42,6 +45,7 @@ class BookingCreationServiceTest {
     @Mock private SublessorRentalApplicationRepository sublessorApplicationRepository;
     @Mock private BookingRepository bookingRepository;
     @Mock private BookingDepositPricingService depositPricingService;
+    @Mock private SublessorHouseholdService sublessorHouseholdService;
     @Mock private BookingCommissionService commissionService;
     @Mock private RoleVerificationGuard verificationGuard;
 
@@ -75,7 +79,7 @@ class BookingCreationServiceTest {
                 .thenReturn(Optional.empty());
         when(bookingRepository.save(any(Booking.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        when(depositPricingService.depositAmountMinor()).thenReturn(5_000L);
+        when(depositPricingService.depositAmountMinor(12_000L)).thenReturn(5_000L);
         when(commissionService.commissionAmountMinor(1_200_000L, 5_000L))
                 .thenReturn(60_250L);
 
@@ -90,6 +94,48 @@ class BookingCreationServiceTest {
         verify(verificationGuard).requireVerified(
                 renterId, com.makaohub.backend.auth.domain.RoleName.RENTER
         );
+    }
+
+    @Test
+    void snapshotsTheDepositEnteredOnTheLandlordListing() {
+        UUID renterId = UUID.randomUUID();
+        UUID listingId = UUID.randomUUID();
+        UUID applicationId = UUID.randomUUID();
+        User user = org.mockito.Mockito.mock(User.class);
+        RentalApplication application = new RentalApplication(renterId, listingId);
+        setId(application, applicationId);
+        application.markUnderReview();
+        application.approve();
+
+        Listing listing = new Listing(
+                UUID.randomUUID(), "Home", "Description", PropertyType.BEDSITTER,
+                45_000, (short) 1, (short) 1, false, LocalDate.now(),
+                45_000L, true, true, true, false, false
+        );
+        setId(listing, listingId);
+        listing.publish();
+
+        when(userRepository.findById(renterId)).thenReturn(Optional.of(user));
+        when(user.getAccountStatus()).thenReturn(AccountStatus.ACTIVE);
+        when(userRoleRepository.existsByUser_IdAndRole_Name(any(), any()))
+                .thenReturn(true);
+        when(rentalApplicationRepository.findByIdAndRenterId(applicationId, renterId))
+                .thenReturn(Optional.of(application));
+        when(landlordListingRepository.findByIdAndStatus(listingId, ListingStatus.PUBLISHED))
+                .thenReturn(Optional.of(listing));
+        when(bookingRepository.findByListingKindAndSourceApplicationId(any(), any()))
+                .thenReturn(Optional.empty());
+        when(bookingRepository.save(any(Booking.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(commissionService.commissionAmountMinor(4_500_000L, 4_500_000L))
+                .thenReturn(0L);
+
+        Booking booking = service().createForLandlordApplication(
+                renterId, applicationId
+        );
+
+        assertEquals(4_500_000L, booking.getDepositAmountMinor());
+        verify(depositPricingService, never()).depositAmountMinor(anyLong());
     }
 
     @Test
@@ -126,6 +172,7 @@ class BookingCreationServiceTest {
                 sublessorApplicationRepository,
                 bookingRepository,
                 depositPricingService,
+                sublessorHouseholdService,
                 commissionService,
                 verificationGuard
         );

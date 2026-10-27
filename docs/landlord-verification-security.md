@@ -81,7 +81,7 @@ Adds Apache PDFBox `3.0.8`. It parses the bounded ownership PDF after malware sc
 
 ### `src/main/resources/application.yaml`
 
-- `security.verification.clamav-socket-path` reads `CLAMAV_SOCKET_PATH`. An empty value is allowed at startup but all confirmations fail closed with `503`.
+- `security.verification.clamav-socket-path` reads `CLAMAV_SOCKET_PATH` and defaults to Debian/Ubuntu's local `/var/run/clamav/clamd.ctl`. A missing or unreachable socket still makes every confirmation fail closed with `503`.
 - `logging.level.org.apache.pdfbox: OFF` prevents malformed customer-controlled PDF text from entering logs.
 - Existing `verification-document-max-bytes` remains 10 MiB. The application and scanner limits must agree.
 

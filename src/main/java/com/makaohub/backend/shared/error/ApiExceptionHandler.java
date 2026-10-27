@@ -43,6 +43,7 @@ public class ApiExceptionHandler {
                  INVALID_OTP -> HttpStatus.UNAUTHORIZED;
 
             case OTP_RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
+            case ROLE_MISMATCH -> HttpStatus.FORBIDDEN;
 
             case GOOGLE_REGISTRATION_REQUIRED,
                  ROLE_SELECTION_REQUIRED,
@@ -77,6 +78,7 @@ public class ApiExceptionHandler {
 
             case ADMIN_ROLE_NOT_ALLOWED,
                  INVALID_PHONE_NUMBER,
+                 INVALID_FULL_NAME,
                  PASSWORD_TOO_SHORT,
                  PASSWORD_TOO_LONG -> HttpStatus.BAD_REQUEST;
 

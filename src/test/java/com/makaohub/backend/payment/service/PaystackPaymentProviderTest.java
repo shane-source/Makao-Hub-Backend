@@ -28,6 +28,20 @@ class PaystackPaymentProviderTest {
     @Mock private PaystackClient paystackClient;
 
     @Test
+    void noPhoneMeansNoExternalCharge() {
+        UUID payerId = UUID.randomUUID();
+        User payer = new User("Synthetic", "synthetic@example.invalid", null, null);
+        when(userRepository.findById(payerId)).thenReturn(Optional.of(payer));
+        PaymentIntent intent = new PaymentIntent(payerId, PaymentType.PLAN_UPGRADE,
+                null, null, PaymentTargetKind.NONE, 500, PaymentIntent.KES, "synthetic-no-phone");
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> new PaystackPaymentProvider(userRepository, phoneProtectionService, paystackClient).start(intent));
+        assertEquals(409, failure.getStatusCode().value());
+        org.mockito.Mockito.verifyNoInteractions(phoneProtectionService, paystackClient);
+    }
+
+    @Test
     void sendsOnlyNormalizedPhoneToPaystackAndReturnsProviderPrompt() {
         UUID payerId = UUID.randomUUID();
         User payer = org.mockito.Mockito.mock(User.class);

@@ -21,6 +21,7 @@ public class AuthException extends RuntimeException {
         ROLE_SELECTION_REQUIRED,
         ROLE_SELECTION_NOT_REQUIRED,
         INVALID_ROLE_SELECTION,
+        ROLE_MISMATCH,
         INVALID_OTP,
         OTP_RATE_LIMITED
     }

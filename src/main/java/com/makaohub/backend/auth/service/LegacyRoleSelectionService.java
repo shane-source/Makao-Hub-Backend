@@ -25,6 +25,23 @@ public class LegacyRoleSelectionService {
         this.userRoles = userRoles;
     }
 
+    /** Checks a login selection without assigning or switching a role. Credentials must already be valid. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void resolveForLogin(User user, RoleName expectedRole) {
+        // Refresh under the existing account lock; legacy role migration remains a separate operation.
+        resolve(user, null);
+        // Only the separate staff/internal login path can omit the public role selection.
+        if (expectedRole == null) return;
+        var assignments = userRoles.findAllByUser_Id(user.getId());
+        if (assignments.size() != 1) {
+            throw new IllegalStateException("An active account must have exactly one role.");
+        }
+        if (assignments.getFirst().getRole().getName() != expectedRole) {
+            throw new AuthException(AuthException.Reason.ROLE_MISMATCH,
+                    "This account does not match the selected role. Choose your account's role.");
+        }
+    }
+
     // Called only AFTER password or Google credentials have been verified.
     // MANDATORY keeps the role choice, audit and token issuance in the login transaction.
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)

@@ -34,6 +34,9 @@ public class RentalApplication {
     private RentalApplicationStatus status =
             RentalApplicationStatus.SUBMITTED;
 
+    @Column(name = "rejection_reason", length = 500)
+    private String rejectionReason;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -66,6 +69,14 @@ public class RentalApplication {
     public void reject() {
         requireStatus(RentalApplicationStatus.UNDER_REVIEW);
         status = RentalApplicationStatus.REJECTED;
+    }
+
+    public void reject(String reason) {
+        if (reason == null || reason.isBlank() || reason.strip().length() > 500) {
+            throw new IllegalArgumentException("A rejection reason is required.");
+        }
+        reject();
+        rejectionReason = reason.strip();
     }
 
     public void withdraw() {
@@ -103,6 +114,10 @@ public class RentalApplication {
 
     public RentalApplicationStatus getStatus() {
         return status;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
     }
 
     public Instant getCreatedAt() {

@@ -223,7 +223,7 @@ public class RenterVerificationService {
         if (bytes == null || bytes.length != objectInfo.sizeBytes()) throw invalidDocumentUpload();
         try {
             {
-                byte[] prepared = imageValidator.prepare(bytes, document.getContentType());
+                byte[] prepared = imageValidator.prepare(bytes, document.getContentType(), document.getDocumentType());
                 try {
                     if (prepared == null || prepared.length == 0 || prepared.length > uploadLimits.verificationDocumentMaxBytes())
                         throw invalidDocumentUpload();

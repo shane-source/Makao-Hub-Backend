@@ -7,6 +7,8 @@ import com.makaohub.backend.auth.service.GoogleRegistrationService;
 import com.makaohub.backend.auth.service.PasswordAuthenticationService;
 import com.makaohub.backend.auth.service.RefreshTokenService;
 import com.makaohub.backend.auth.service.RegistrationService;
+import com.makaohub.backend.auth.domain.RoleName;
+import com.makaohub.backend.auth.exception.AuthException;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -70,6 +72,7 @@ public class AuthController {
     public OtpChallengeResponse login(
             @Valid @RequestBody LoginRequest request
     ) {
+        requirePublicLoginRole(request.expectedRole());
         return authOtpService.startLogin(
                 passwordAuthenticationService.verifyCredentials(request)
         );
@@ -129,9 +132,17 @@ public class AuthController {
     public OtpChallengeResponse authenticateWithGoogle(
             @Valid @RequestBody GoogleAuthRequest request
     ) {
+        requirePublicLoginRole(request.expectedRole());
         return authOtpService.startLogin(
-                googleAuthenticationService.verifyIdentity(request.idToken())
+                googleAuthenticationService.verifyIdentity(request.idToken(), request.expectedRole())
         );
+    }
+
+    private void requirePublicLoginRole(RoleName expectedRole) {
+        if (expectedRole == null || expectedRole == RoleName.ADMIN) {
+            throw new AuthException(AuthException.Reason.INVALID_ROLE_SELECTION,
+                    "Choose RENTER, LANDLORD or SUBLESSOR before signing in.");
+        }
     }
 
     @PostMapping("/google/verify-otp")

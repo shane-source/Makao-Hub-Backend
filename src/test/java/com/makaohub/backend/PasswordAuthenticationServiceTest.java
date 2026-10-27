@@ -91,7 +91,7 @@ class PasswordAuthenticationServiceTest {
         assertSame(expectedResponse, actualResponse);
 
         verify(authenticationTokenService).issue(user);
-        verify(roleSelectionService).resolve(user, null);
+        verify(roleSelectionService).resolveForLogin(user, null);
     }
 
     @Test

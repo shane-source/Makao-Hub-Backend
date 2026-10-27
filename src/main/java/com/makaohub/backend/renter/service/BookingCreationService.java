@@ -10,6 +10,7 @@ import com.makaohub.backend.property.domain.ListingStatus;
 import com.makaohub.backend.property.domain.SublessorListing;
 import com.makaohub.backend.property.repository.ListingRepository;
 import com.makaohub.backend.property.repository.SublessorListingRepository;
+import com.makaohub.backend.property.service.SublessorHouseholdService;
 import com.makaohub.backend.renter.domain.Booking;
 import com.makaohub.backend.renter.domain.BookingListingKind;
 import com.makaohub.backend.renter.domain.RentalApplication;
@@ -40,6 +41,7 @@ public class BookingCreationService {
     private final SublessorRentalApplicationRepository sublessorApplicationRepository;
     private final BookingRepository bookingRepository;
     private final BookingDepositPricingService depositPricingService;
+    private final SublessorHouseholdService sublessorHouseholdService;
     private final BookingCommissionService commissionService;
     private final RoleVerificationGuard verificationGuard;
 
@@ -52,6 +54,7 @@ public class BookingCreationService {
             SublessorRentalApplicationRepository sublessorApplicationRepository,
             BookingRepository bookingRepository,
             BookingDepositPricingService depositPricingService,
+            SublessorHouseholdService sublessorHouseholdService,
             BookingCommissionService commissionService,
             RoleVerificationGuard verificationGuard
     ) {
@@ -63,11 +66,12 @@ public class BookingCreationService {
         this.sublessorApplicationRepository = sublessorApplicationRepository;
         this.bookingRepository = bookingRepository;
         this.depositPricingService = depositPricingService;
+        this.sublessorHouseholdService = sublessorHouseholdService;
         this.commissionService = commissionService;
         this.verificationGuard = verificationGuard;
     }
 
-    /** The deposit must come from trusted server-side pricing policy. */
+    /** New listings use their persisted owner-entered deposit; historical rows retain the configured fallback. */
     @Transactional
     public Booking createForLandlordApplication(
             UUID renterId,
@@ -93,7 +97,9 @@ public class BookingCreationService {
         }
 
         long rentAmountMinor = toMinorUnits(listing.getMonthlyRentKes());
-        long depositAmountMinor = depositPricingService.depositAmountMinor();
+        long depositAmountMinor = listing.getDepositKes() == null
+                ? depositPricingService.depositAmountMinor(listing.getMonthlyRentKes())
+                : toMinorUnits(listing.getDepositKes());
         long commissionAmountMinor = commissionService.commissionAmountMinor(
                 rentAmountMinor,
                 depositAmountMinor
@@ -138,7 +144,10 @@ public class BookingCreationService {
         }
 
         long rentAmountMinor = toMinorUnits(listing.getMonthlyRentKes());
-        long depositAmountMinor = depositPricingService.depositAmountMinor();
+        Long depositKes = sublessorHouseholdService.depositKesForBooking(listing.getId());
+        long depositAmountMinor = depositKes == null
+                ? depositPricingService.depositAmountMinor(listing.getMonthlyRentKes())
+                : toMinorUnits(depositKes);
         long commissionAmountMinor = commissionService.commissionAmountMinor(
                 rentAmountMinor,
                 depositAmountMinor

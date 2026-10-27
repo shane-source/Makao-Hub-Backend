@@ -121,6 +121,17 @@ class ProfileServiceTest {
     }
 
     @Test
+    void googleAccountWithoutPhoneCanLoadItsOwnProfile() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(user.getAccountStatus()).thenReturn(AccountStatus.ACTIVE);
+        when(userRoleRepository.findAllByUser_Id(USER_ID)).thenReturn(List.of(userRole));
+        when(userRole.getRole()).thenReturn(role);
+        when(role.getName()).thenReturn(RoleName.RENTER);
+        assertEquals(null, profileService.getMyProfile(USER_ID).phoneNumber());
+        verifyNoInteractions(phoneProtectionService);
+    }
+
+    @Test
     void rejectsInactiveAccount() {
         when(userRepository.findById(USER_ID))
                 .thenReturn(Optional.of(user));

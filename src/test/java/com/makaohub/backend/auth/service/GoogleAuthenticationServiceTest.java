@@ -86,7 +86,7 @@ class GoogleAuthenticationServiceTest {
         var order = inOrder(selection, tokens);
 
         order.verify(selection)
-                .resolve(user, null);
+                .resolveForLogin(user, null);
 
         order.verify(tokens)
                 .issue(user);

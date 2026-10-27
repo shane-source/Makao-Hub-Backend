@@ -1,5 +1,13 @@
 # Sublessor workspace backend contracts
 
+## 22 October 2026 screen-set reconciliation
+
+The latest twelve Sublessor frames are supported by the contracts below plus the later V58 staff-moderation contracts. `ModerationSubmissionController` exposes owned submit/revise actions for Sublessor listings; `AdminWorkflowService.ownerListingReview` returns the owned review state; V58 prevents database publication unless the saved moderation state is `APPROVED` and invalidates approval when listing, media, location, or shared-home details change. These checks keep the preview, rejected, approved, publish, pause, and resume screens server-authoritative.
+
+The percentage values in the reference discovery cards are illustrative only. `RoommatePreferencesService` deliberately returns an unranked, opted-in list and public profiles because scoring weights and rounding remain TBC. Direct discovery-started chat is also not added because the chat-unlock model remains TBC; protected chat continues from the accepted-interest lifecycle. Test-payment screens read existing owner ledger records and do not create payout destinations, custody, release, fee, or commission policy.
+
+Focused verification on 22 October: **22 backend tests passed** across Sublessor authorization, application ownership/rejection, publication, evidence policy, and document-controller boundaries. No live database or payment provider was touched. The optional PostgreSQL integration suite still requires the isolated `MAKAO_ROLE_TEST_DB_URL` environment and was not run against production.
+
 15 October 2026. Companion Android/code guide: `/home/hp/Desktop/makao-hub-frontend/SUBLESSOR_IMPLEMENTATION.md`. Scope is the approved shared-home fields, verification, preferences and discovery needed by the selected Sublessor screens. No matching weights or payment rules are chosen.
 
 All Java paths below are relative to `/home/hp/Desktop/makao-hub-backend/src/main/java/com/makaohub/backend/`. Actor IDs come from validated JWT subjects, not request bodies. Existing Spring Security role routes remain mandatory. New JDBC services independently check the database role and ACTIVE account; household queries also match the owner. Existing JPA services are extended locally, not rewritten.
@@ -101,6 +109,7 @@ New/updated tests and purpose:
 - `roommate/api/SharedHomeAuthorizationTest`: JWT-only owner identity, wrong-role/anonymous access and invalid preferences.
 - `roommate/service/SharedHomeIntegrationTest`: actual PostgreSQL/Flyway schema; owner/draft isolation, current-role verification, opt-out, contact masking, bounded pages and append-only audit. Synthetic fixture respects the existing automatic role-verification trigger.
 - `property/service/SublessorPublicationTest.videoOnlyCannotSatisfyTheRequiredPhoto`: a confirmed generic media record cannot satisfy IMAGE requirement; no publish/save occurs on failure.
+- `renter/service/SublessorApplicationReviewTest`: an owned application can move through review to a reasoned rejection; another Sublessor receives the same 404 as an unavailable record, and a non-Sublessor receives 403 before any state transition.
 - Android `SublessorContractTest` and `RentalChatSocketTest`: wire payloads, role guard, nullable household, answer validation, actual roommate destinations and server-masked echo.
 
 400 means invalid inputs/file; 403 means role/verification/discovery access denied; 404 hides unavailable owned/public records; 409 means state conflict/explicit replacement needed; scanner/provider failure remains failure, not readiness. A separate normal-runtime application-context smoke test requires real deployment configuration and was excluded from the isolated suite. No SMS/email/real payment or live database mutation was performed.

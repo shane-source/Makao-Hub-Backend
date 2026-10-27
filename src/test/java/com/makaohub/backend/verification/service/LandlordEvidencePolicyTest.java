@@ -72,10 +72,34 @@ class LandlordEvidencePolicyTest {
         }
     }
 
+    @Test void eitherRejectedIdSideCanBeSupersededWithANewUploadRecord() {
+        for (var side : List.of(VerificationDocumentType.ID_FRONT, VerificationDocumentType.ID_BACK)) {
+            var old = document(side, "image/jpeg");
+            ReflectionTestUtils.setField(old, "id", UUID.randomUUID());
+            when(documents.findByLandlordIdAndDocumentTypeAndStatusIn(eq(actor), eq(side), anyCollection()))
+                    .thenReturn(Optional.of(old));
+
+            var replacement = service.createDocumentUploadUrl(actor, side, "image/jpeg", true);
+
+            assertEquals(side, replacement.documentType());
+            assertEquals(VerificationDocumentStatus.DELETED, old.getStatus());
+            verify(documents).saveAndFlush(old);
+            assertNotEquals(old.getId(), replacement.documentId());
+        }
+        verify(storage, times(2)).createSignedEvidenceUploadUrl(endsWith(".jpg"));
+    }
+
     @Test void foreignDocumentNeverReachesStorageOrScanning() {
         assertThrows(ResponseStatusException.class, () -> service.confirmDocumentUpload(actor, id));
         verify(documents).findByIdAndLandlordId(id, actor);
         verifyNoInteractions(storage, pdf, image);
+    }
+
+    @Test void wrongRoleCannotReachDocumentsStorageOrImageValidation() {
+        when(roles.existsByUser_IdAndRole_Name(actor, RoleName.LANDLORD)).thenReturn(false);
+        assertEquals(403, assertThrows(ResponseStatusException.class,
+                () -> service.confirmDocumentUpload(actor, id)).getStatusCode().value());
+        verifyNoInteractions(documents, storage, pdf, image);
     }
 
     @Test void scannerFailureLeavesUploadUnconfirmedAndCleanPdfBecomesReady() {
@@ -98,7 +122,7 @@ class LandlordEvidencePolicyTest {
         when(documents.findByIdAndLandlordId(id, actor)).thenReturn(Optional.of(record));
         when(storage.getVerificationDocumentInfo(record.getObjectPath())).thenReturn(new SupabaseStorageClient.StoredObjectInfo("image/jpeg", 3));
         when(storage.readVerificationDocument(record.getObjectPath(), 3)).thenReturn(new byte[] {1,2,3});
-        when(image.prepare(any(), eq("image/jpeg"))).thenReturn(new byte[] {4,5});
+        when(image.prepare(any(), eq("image/jpeg"), eq(VerificationDocumentType.ID_FRONT))).thenReturn(new byte[] {4,5});
         service.confirmDocumentUpload(actor, id);
         verify(storage).storePreparedVerificationImage(eq(record.getObjectPath()), eq("image/jpeg"), any());
         assertEquals(2L, record.getSizeBytes());
@@ -131,5 +155,23 @@ class LandlordEvidencePolicyTest {
 
     private LandlordVerificationDocument document(VerificationDocumentType type, String mime) {
         return new LandlordVerificationDocument(actor, type, actor + "/evidence-v1/synthetic.pdf", mime);
+    }
+
+    @Test void imageSecurityFailureNeverBecomesReadyOrReachesPreparedStorage() {
+        for (var side : List.of(VerificationDocumentType.ID_FRONT, VerificationDocumentType.ID_BACK)) {
+            var record = document(side, "image/jpeg");
+            when(documents.findByIdAndLandlordId(id, actor)).thenReturn(Optional.of(record));
+            when(storage.getVerificationDocumentInfo(record.getObjectPath()))
+                    .thenReturn(new SupabaseStorageClient.StoredObjectInfo("image/jpeg", 3));
+            when(storage.readVerificationDocument(record.getObjectPath(), 3)).thenAnswer(call -> new byte[]{1,2,3});
+            for (var status : List.of(HttpStatus.BAD_REQUEST, HttpStatus.SERVICE_UNAVAILABLE)) {
+                when(image.prepare(any(), eq("image/jpeg"), eq(side))).thenThrow(new ResponseStatusException(status));
+                assertEquals(status, assertThrows(ResponseStatusException.class,
+                        () -> service.confirmDocumentUpload(actor, id)).getStatusCode());
+                assertEquals(VerificationDocumentStatus.UPLOADING, record.getStatus());
+            }
+        }
+        verify(storage, never()).storePreparedVerificationImage(any(), any(), any());
+        verifyNoInteractions(pdf);
     }
 }

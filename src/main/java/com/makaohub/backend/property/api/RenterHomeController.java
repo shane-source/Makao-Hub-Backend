@@ -6,6 +6,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.HttpStatus;
+import java.time.LocalDate;
 import java.util.*;
 
 @RestController
@@ -22,8 +23,9 @@ public class RenterHomeController {
         @RequestParam(required=false) String area,@RequestParam(required=false) Long minRentKes,
         @RequestParam(required=false) Long maxRentKes,@RequestParam(required=false) String source,
         @RequestParam(required=false) Integer minBedrooms,@RequestParam(required=false) Boolean furnished,
+        @RequestParam(required=false) String propertyType,@RequestParam(required=false) LocalDate availableBy,
         @RequestParam(defaultValue="false") boolean saved) {
-        return homes.search(actor(jwt),page,size,area,minRentKes,maxRentKes,source,minBedrooms,furnished,saved);
+        return homes.search(actor(jwt),page,size,area,minRentKes,maxRentKes,source,minBedrooms,furnished,propertyType,availableBy,saved);
     }
     @GetMapping("/{source}/{id}") public RenterHomeService.Home one(@AuthenticationPrincipal Jwt jwt,@PathVariable String source,@PathVariable UUID id) {
         return homes.one(actor(jwt),source,id);

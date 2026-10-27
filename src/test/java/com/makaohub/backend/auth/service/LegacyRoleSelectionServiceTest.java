@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -74,5 +75,26 @@ class LegacyRoleSelectionServiceTest {
         assertEquals(AuthException.Reason.ROLE_SELECTION_NOT_REQUIRED,
                 assertThrows(AuthException.class, () -> service.resolve(user, RoleName.SUBLESSOR)).getReason());
         verifyNoInteractions(roles, userRoles);
+    }
+
+    @Test void expectedLoginRoleCannotCompleteALegacyRoleChoice() {
+        User user = pendingUser();
+        assertEquals(AuthException.Reason.ROLE_SELECTION_REQUIRED,
+                assertThrows(AuthException.class, () -> service.resolveForLogin(user, RoleName.RENTER)).getReason());
+        assertTrue(user.isRoleSelectionRequired());
+        assertEquals(1L, user.getAuthorizationVersion());
+        verifyNoInteractions(roles, userRoles);
+    }
+
+    @Test void loginFailsClosedIfTheStoredRoleAssignmentIsMissingOrAmbiguous() {
+        User user = pendingUser();
+        ReflectionTestUtils.setField(user, "roleSelectionRequired", false);
+        when(userRoles.findAllByUser_Id(user.getId())).thenReturn(List.of())
+                .thenReturn(List.of(mock(UserRole.class), mock(UserRole.class)));
+        assertThrows(IllegalStateException.class, () -> service.resolveForLogin(user, RoleName.RENTER));
+        assertThrows(IllegalStateException.class, () -> service.resolveForLogin(user, RoleName.RENTER));
+        verify(userRoles, never()).saveAndFlush(any());
+        assertEquals(1L, user.getAuthorizationVersion());
+        verifyNoInteractions(roles);
     }
 }

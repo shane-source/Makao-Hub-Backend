@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import java.time.LocalDate;
@@ -36,6 +37,20 @@ public record CreateListingDraftRequest(
 
         boolean furnished,
 
-        LocalDate availableFrom
+        LocalDate availableFrom,
+
+        @NotNull(message = "Deposit is required.")
+        @PositiveOrZero(message = "Deposit cannot be negative.")
+        Long depositKes,
+
+        Boolean waterAvailable,
+
+        Boolean securityAvailable,
+
+        Boolean parkingAvailable,
+
+        Boolean balcony,
+
+        Boolean petsAllowed
 ) {
 }

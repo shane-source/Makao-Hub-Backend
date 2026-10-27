@@ -34,16 +34,6 @@ import java.util.UUID;
 @RequestMapping("/api/v1/payments")
 public class MockPaymentController {
 
-    public record UnlockPrice(String paymentType, long amountMinor, String currency) {}
-    @org.springframework.web.bind.annotation.GetMapping("/prices/{type}")
-    public UnlockPrice price(@AuthenticationPrincipal Jwt jwt,
-            @org.springframework.web.bind.annotation.PathVariable PaymentType type) {
-        requireRole(activeRole(jwt), RoleName.RENTER);
-        if (!List.of(PaymentType.EXACT_LOCATION_UNLOCK,PaymentType.VIDEO_UNLOCK,PaymentType.PHONE_UNLOCK).contains(type))
-            throw badRequest("Only listing unlock prices are available here.");
-        return new UnlockPrice(type.name(),pricingService.amountMinor(type),"KES");
-    }
-
     private final PaymentIntentService paymentIntentService;
     private final PaymentPricingService pricingService;
     private final ListingRepository landlordListings;

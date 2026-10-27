@@ -86,14 +86,9 @@ public class PasswordAuthenticationService {
             );
         }
 
-        /*
-         * No role is accepted from the login request.
-         *
-         * This only validates legacy accounts that may still require
-         * migration. For normal accounts, the method confirms that the
-         * stored role selection is complete.
-         */
-        roleSelectionService.resolve(user, null);
+        // The selection must match the stored role. It must never replace that role.
+        // This runs after password validation, before an OTP or tokens can be issued.
+        roleSelectionService.resolveForLogin(user, request.expectedRole());
 
         /*
          * AuthenticationTokenService reads the user's stored role from

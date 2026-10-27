@@ -97,22 +97,32 @@ public class SupabaseStorageClient {
 
     /** Bounded private download for server validation; never return file bytes or this URL to callers. */
     public byte[] readVerificationDocument(String objectPath, long expectedBytes) {
-        if (expectedBytes < 1 || expectedBytes > 10_485_760 || objectPath == null
+        return readPrivateObject(properties.verificationBucket(), objectPath, expectedBytes, 10_485_760, Duration.ofSeconds(15));
+    }
+
+    /** Bounded private listing-media download for authenticated staff review. */
+    public byte[] readListingMedia(String objectPath, long expectedBytes) {
+        return readPrivateObject(properties.listingMediaBucket(), objectPath, expectedBytes, 52_428_800, Duration.ofSeconds(60));
+    }
+
+    private byte[] readPrivateObject(String bucket, String objectPath, long expectedBytes,
+            long maximumBytes, Duration timeout) {
+        if (expectedBytes < 1 || expectedBytes > maximumBytes || objectPath == null
                 || !objectPath.matches("[A-Za-z0-9/_\\-.]+") || objectPath.contains("..")
                 || objectPath.startsWith("/")) throw invalidEvidence();
         URI base = URI.create(properties.url());
         if (!"https".equals(base.getScheme()) || base.getHost() == null || base.getUserInfo() != null) throw unavailableEvidence();
         URI uri = URI.create(properties.url() + "/storage/v1/object/authenticated/"
-                + properties.verificationBucket() + "/" + objectPath);
+                + bucket + "/" + objectPath);
         if (!base.getHost().equals(uri.getHost()) || uri.getUserInfo() != null) throw unavailableEvidence();
         try (var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5))
                 .followRedirects(HttpClient.Redirect.NEVER).build()) {
-            var request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(15))
+            var request = HttpRequest.newBuilder(uri).timeout(timeout)
                     .header("apikey", properties.serviceRoleKey())
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.serviceRoleKey()).GET().build();
             var transfer = client.sendAsync(request, ignored -> new LimitedEvidenceBody(expectedBytes));
             HttpResponse<byte[]> response;
-            try { response = transfer.get(15, TimeUnit.SECONDS); }
+            try { response = transfer.get(timeout.toMillis(), TimeUnit.MILLISECONDS); }
             catch (TimeoutException | InterruptedException failure) {
                 transfer.cancel(true);
                 if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
@@ -217,15 +227,23 @@ public class SupabaseStorageClient {
     public void deleteListingMedia(
             String objectPath
     ) {
-        restClient.delete()
-                .uri(
-                        "/object/"
-                                + properties.listingMediaBucket()
-                                + "/"
-                                + objectPath
-                )
-                .retrieve()
-                .toBodilessEntity();
+        try {
+            restClient.delete()
+                    .uri(
+                            "/object/"
+                                    + properties.listingMediaBucket()
+                                    + "/"
+                                    + objectPath
+                    )
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException exception) {
+            // A repeated cleanup is successful when the private object is
+            // already absent. Other storage failures remain fail-closed.
+            if (exception.getStatusCode().value() != 404) {
+                throw exception;
+            }
+        }
     }
 
     private SignedUploadUrl createSignedUploadUrl(

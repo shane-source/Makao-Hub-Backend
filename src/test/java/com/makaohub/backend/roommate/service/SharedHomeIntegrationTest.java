@@ -50,7 +50,8 @@ class SharedHomeIntegrationTest {
         assertEquals(value,household.get(owner,listing));
         assertEquals(404,assertThrows(ResponseStatusException.class,()->household.get(other,listing)).getStatusCode().value());
         assertEquals(404,assertThrows(ResponseStatusException.class,()->household.save(other,listing,value)).getStatusCode().value());
-        jdbc.update("UPDATE sublessor_listings SET status='PUBLISHED' WHERE id=?",listing);
+        // This fixture represents a completed staff approval, not an owner bypass.
+        jdbc.update("UPDATE sublessor_listings SET moderation_status='APPROVED',status='PUBLISHED' WHERE id=?",listing);
         assertEquals(409,assertThrows(ResponseStatusException.class,()->household.save(owner,listing,value)).getStatusCode().value());
         jdbc.update("UPDATE sublessor_listings SET status='DRAFT' WHERE id=?",listing);
     }

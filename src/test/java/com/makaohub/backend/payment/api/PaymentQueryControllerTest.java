@@ -1,13 +1,16 @@
 package com.makaohub.backend.payment.api;
 
 import com.makaohub.backend.payment.domain.PaymentIntent;
+import com.makaohub.backend.payment.domain.PaymentType;
 import com.makaohub.backend.payment.repository.PaymentIntentRepository;
+import com.makaohub.backend.payment.service.PaymentPricingService;
 import com.makaohub.backend.shared.api.PageResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -28,6 +31,31 @@ class PaymentQueryControllerTest {
     @Mock
     private PaymentIntentRepository repository;
 
+    private PaymentQueryController controller() {
+        return new PaymentQueryController(repository, new PaymentPricingService(
+                new MockEnvironment()
+                        .withProperty("makao.payment.prices.exact-location-unlock-minor", "32100")
+                        .withProperty("makao.payment.prices.video-unlock-minor", "12300")
+                        .withProperty("makao.payment.prices.phone-unlock-minor", "4500")
+        ));
+    }
+
+    @Test
+    void renterCanReadServerOwnedUnlockPriceInEveryPaymentProfile() {
+        PaymentQueryController.UnlockPrice quote = controller().price(
+                jwt(UUID.randomUUID(), "RENTER"), PaymentType.EXACT_LOCATION_UNLOCK
+        );
+
+        assertEquals(32100, quote.amountMinor());
+        assertEquals("KES", quote.currency());
+        assertThrows(ResponseStatusException.class, () -> controller().price(
+                jwt(UUID.randomUUID(), "LANDLORD"), PaymentType.EXACT_LOCATION_UNLOCK
+        ));
+        assertThrows(ResponseStatusException.class, () -> controller().price(
+                jwt(UUID.randomUUID(), "RENTER"), PaymentType.BOOKING
+        ));
+    }
+
     @Test
     void statusOnlyReadsAnIntentOwnedByTheAuthenticatedUser() {
         UUID userId = UUID.randomUUID();
@@ -38,7 +66,7 @@ class PaymentQueryControllerTest {
         when(repository.findByIdAndPayerUserId(intentId, userId))
                 .thenReturn(Optional.of(intent));
 
-        PaymentIntentResponse response = new PaymentQueryController(repository)
+        PaymentIntentResponse response = controller()
                 .status(jwt(userId, "RENTER"), new PaymentStatusRequest(intentId));
 
         assertEquals(intentId, response.id());
@@ -52,7 +80,7 @@ class PaymentQueryControllerTest {
                 .thenReturn(new PageImpl<>(List.of()));
 
         PageResponse<PaymentIntentResponse> response =
-                new PaymentQueryController(repository)
+                controller()
                         .history(jwt(userId, "LANDLORD"), 0, 20);
 
         assertEquals(0, response.totalElements());
@@ -62,7 +90,7 @@ class PaymentQueryControllerTest {
     @Test
     void adminCannotUseTheCustomerPaymentHistoryEndpoint() {
         assertThrows(ResponseStatusException.class, () ->
-                new PaymentQueryController(repository)
+                controller()
                         .history(jwt(UUID.randomUUID(), "ADMIN"), 0, 20)
         );
     }

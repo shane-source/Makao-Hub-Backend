@@ -235,7 +235,7 @@ public class LandlordVerificationService {
                 pdfValidator.validate(bytes);
                 document.markReady(bytes.length);
             } else {
-                byte[] prepared = imageValidator.prepare(bytes, document.getContentType());
+                byte[] prepared = imageValidator.prepare(bytes, document.getContentType(), document.getDocumentType());
                 try {
                     if (prepared == null || prepared.length == 0 || prepared.length > uploadLimits.verificationDocumentMaxBytes())
                         throw invalidDocumentUpload();

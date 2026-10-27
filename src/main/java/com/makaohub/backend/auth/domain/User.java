@@ -33,12 +33,11 @@ public class User {
     @Column(name = "password_hash", length = 255)
     private String passwordHash;
 
-    @Column(name = "phone_ciphertext", nullable = false)
+    @Column(name = "phone_ciphertext")
     private byte[] phoneCiphertext;
 
     @Column(
             name = "phone_lookup_hash",
-            nullable = false,
             unique = true,
             length = 64
     )
@@ -83,6 +82,8 @@ public class User {
         );
 
         this.passwordHash = Objects.requireNonNull(passwordHash);
+        Objects.requireNonNull(phoneCiphertext, "Password registration requires a phone.");
+        Objects.requireNonNull(phoneLookupHash, "Password registration requires a phone lookup hash.");
     }
 
     public User(
@@ -97,12 +98,11 @@ public class User {
                 .trim()
                 .toLowerCase(Locale.ROOT);
 
-        this.phoneCiphertext = Objects
-                .requireNonNull(phoneCiphertext)
-                .clone();
-
-        this.phoneLookupHash =
-                Objects.requireNonNull(phoneLookupHash);
+        if ((phoneCiphertext == null) != (phoneLookupHash == null)) {
+            throw new IllegalArgumentException("Phone ciphertext and lookup hash must be supplied together.");
+        }
+        this.phoneCiphertext = phoneCiphertext == null ? null : phoneCiphertext.clone();
+        this.phoneLookupHash = phoneLookupHash;
     }
 
     private static String normalizeFullName(String fullName) {
@@ -137,7 +137,7 @@ public class User {
     }
 
     public byte[] getPhoneCiphertext() {
-        return phoneCiphertext.clone();
+        return phoneCiphertext == null ? null : phoneCiphertext.clone();
     }
 
     public String getPhoneLookupHash() {

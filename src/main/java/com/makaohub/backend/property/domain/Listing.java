@@ -52,6 +52,24 @@ public class Listing {
     @Column(name = "available_from")
     private LocalDate availableFrom;
 
+    @Column(name = "deposit_kes")
+    private Long depositKes;
+
+    @Column(name = "water_available")
+    private Boolean waterAvailable;
+
+    @Column(name = "security_available")
+    private Boolean securityAvailable;
+
+    @Column(name = "parking_available")
+    private Boolean parkingAvailable;
+
+    @Column
+    private Boolean balcony;
+
+    @Column(name = "pets_allowed")
+    private Boolean petsAllowed;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private ListingStatus status = ListingStatus.DRAFT;
@@ -78,6 +96,42 @@ public class Listing {
             boolean furnished,
             LocalDate availableFrom
     ) {
+        this(
+                landlordId,
+                title,
+                description,
+                propertyType,
+                monthlyRentKes,
+                bedroomCount,
+                bathroomCount,
+                furnished,
+                availableFrom,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
+    }
+
+    public Listing(
+            UUID landlordId,
+            String title,
+            String description,
+            PropertyType propertyType,
+            long monthlyRentKes,
+            short bedroomCount,
+            short bathroomCount,
+            boolean furnished,
+            LocalDate availableFrom,
+            Long depositKes,
+            Boolean waterAvailable,
+            Boolean securityAvailable,
+            Boolean parkingAvailable,
+            Boolean balcony,
+            Boolean petsAllowed
+    ) {
         this.landlordId = Objects.requireNonNull(landlordId);
         updateDetails(
                 title,
@@ -87,7 +141,13 @@ public class Listing {
                 bedroomCount,
                 bathroomCount,
                 furnished,
-                availableFrom
+                availableFrom,
+                depositKes,
+                waterAvailable,
+                securityAvailable,
+                parkingAvailable,
+                balcony,
+                petsAllowed
         );
     }
 
@@ -99,10 +159,14 @@ public class Listing {
             short bedroomCount,
             short bathroomCount,
             boolean furnished,
-            LocalDate availableFrom
-    )
-
-    {
+            LocalDate availableFrom,
+            Long depositKes,
+            Boolean waterAvailable,
+            Boolean securityAvailable,
+            Boolean parkingAvailable,
+            Boolean balcony,
+            Boolean petsAllowed
+    ) {
         this.title = Objects.requireNonNull(title).strip();
         this.description = Objects.requireNonNull(description).strip();
         this.propertyType = Objects.requireNonNull(propertyType);
@@ -111,6 +175,15 @@ public class Listing {
         this.bathroomCount = bathroomCount;
         this.furnished = furnished;
         this.availableFrom = availableFrom;
+        if (depositKes != null && depositKes < 0) {
+            throw new IllegalArgumentException("Deposit cannot be negative.");
+        }
+        this.depositKes = depositKes;
+        this.waterAvailable = waterAvailable;
+        this.securityAvailable = securityAvailable;
+        this.parkingAvailable = parkingAvailable;
+        this.balcony = balcony;
+        this.petsAllowed = petsAllowed;
     }
 
     public void publish() {
@@ -191,6 +264,50 @@ public class Listing {
 
     public LocalDate getAvailableFrom() {
         return availableFrom;
+    }
+
+    public Long getDepositKes() {
+        return depositKes;
+    }
+
+    public boolean isWaterAvailable() {
+        return Boolean.TRUE.equals(waterAvailable);
+    }
+
+    public boolean isSecurityAvailable() {
+        return Boolean.TRUE.equals(securityAvailable);
+    }
+
+    public boolean isParkingAvailable() {
+        return Boolean.TRUE.equals(parkingAvailable);
+    }
+
+    public boolean hasBalcony() {
+        return Boolean.TRUE.equals(balcony);
+    }
+
+    public boolean isPetsAllowed() {
+        return Boolean.TRUE.equals(petsAllowed);
+    }
+
+    public Boolean getWaterAvailable() {
+        return waterAvailable;
+    }
+
+    public Boolean getSecurityAvailable() {
+        return securityAvailable;
+    }
+
+    public Boolean getParkingAvailable() {
+        return parkingAvailable;
+    }
+
+    public Boolean getBalcony() {
+        return balcony;
+    }
+
+    public Boolean getPetsAllowed() {
+        return petsAllowed;
     }
 
     public ListingStatus getStatus() {

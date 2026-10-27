@@ -54,6 +54,22 @@ public class EmailOtpClient {
         message.setText("Your Makao Hub code to " + action + " is " + code
                 + ".\nIt expires in five minutes and can be used once. Do not share it."
                 + "\nIf you did not request this code, ignore this email.");
+        deliver(message);
+    }
+
+    public void sendStaffInvitation(String email, String invitationCode) {
+        if (!EmailOtpProperties.validEmail(email) || invitationCode == null || !invitationCode.matches("[A-Za-z0-9_-]{43}"))
+            throw new IllegalArgumentException("Invalid staff invitation.");
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setFrom(from); message.setTo(email); message.setSubject("Makao Hub staff invitation");
+        message.setText("You have been invited to Makao Hub's staff website.\n"
+                + "Enter this invitation code only on your trusted staff website:\n" + invitationCode
+                + "\nIt expires in 24 hours and can be used once. Do not forward it.\n"
+                + "Choose a dedicated staff password. Every staff sign-in also requires an email OTP.");
+        deliver(message);
+    }
+
+    private void deliver(SimpleMailMessage message) {
         try {
             // No automatic retry: a timeout may hide SMTP acceptance.
             sender.send(message);

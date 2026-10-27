@@ -1,7 +1,10 @@
 package com.makaohub.backend.payment.api;
 
 import com.makaohub.backend.auth.domain.RoleName;
+import com.makaohub.backend.payment.domain.PaymentIntent;
+import com.makaohub.backend.payment.domain.PaymentType;
 import com.makaohub.backend.payment.repository.PaymentIntentRepository;
+import com.makaohub.backend.payment.service.PaymentPricingService;
 import com.makaohub.backend.shared.api.PageResponse;
 import com.makaohub.backend.shared.api.PaginationPolicy;
 import jakarta.validation.Valid;
@@ -28,9 +31,38 @@ public class PaymentQueryController {
     private static final int MAX_PAGE_SIZE = 50;
 
     private final PaymentIntentRepository paymentIntentRepository;
+    private final PaymentPricingService pricingService;
 
-    public PaymentQueryController(PaymentIntentRepository paymentIntentRepository) {
+    public PaymentQueryController(
+            PaymentIntentRepository paymentIntentRepository,
+            PaymentPricingService pricingService
+    ) {
         this.paymentIntentRepository = paymentIntentRepository;
+        this.pricingService = pricingService;
+    }
+
+    public record UnlockPrice(PaymentType paymentType, long amountMinor, String currency) { }
+
+    @GetMapping("/prices/{type}")
+    public UnlockPrice price(
+            @AuthenticationPrincipal Jwt jwt,
+            @org.springframework.web.bind.annotation.PathVariable PaymentType type
+    ) {
+        if (activeRole(jwt) != RoleName.RENTER) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Only renters can read listing-unlock prices."
+            );
+        }
+        if (type != PaymentType.EXACT_LOCATION_UNLOCK
+                && type != PaymentType.VIDEO_UNLOCK
+                && type != PaymentType.PHONE_UNLOCK) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Only listing unlock prices are available here."
+            );
+        }
+        return new UnlockPrice(type, pricingService.amountMinor(type), PaymentIntent.KES);
     }
 
     @PostMapping("/status")
@@ -88,18 +120,25 @@ public class PaymentQueryController {
     }
 
     private static void requirePaymentRole(Jwt jwt) {
+        RoleName role = activeRole(jwt);
+        if (role == RoleName.ADMIN) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Use the admin payment review endpoint."
+            );
+        }
+    }
+
+    private static RoleName activeRole(Jwt jwt) {
+        if (jwt == null) {
+            throw unauthorized();
+        }
         List<String> roles = jwt.getClaimAsStringList("roles");
         if (roles == null || roles.size() != 1) {
             throw unauthorized();
         }
         try {
-            RoleName role = RoleName.valueOf(roles.getFirst());
-            if (role == RoleName.ADMIN) {
-                throw new ResponseStatusException(
-                        HttpStatus.FORBIDDEN,
-                        "Use the admin payment review endpoint."
-                );
-            }
+            return RoleName.valueOf(roles.getFirst());
         } catch (IllegalArgumentException exception) {
             throw unauthorized();
         }

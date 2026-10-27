@@ -22,6 +22,13 @@ import java.util.concurrent.TimeUnit;
 public class AuthRateLimitFilter extends OncePerRequestFilter {
 
     private static final Map<String, RateLimit> RATE_LIMITS = Map.ofEntries(
+            Map.entry("/api/v1/staff/auth/login", new RateLimit(10, Duration.ofMinutes(1))),
+            Map.entry("/api/v1/staff/auth/verify-otp", new RateLimit(10, Duration.ofMinutes(15))),
+            Map.entry("/api/v1/staff/auth/accept-invitation", new RateLimit(5, Duration.ofHours(1))),
+            Map.entry("/api/v1/staff/auth/refresh", new RateLimit(30, Duration.ofMinutes(1))),
+            Map.entry("/api/v1/staff/auth/forgot-password", new RateLimit(5, Duration.ofHours(1))),
+            Map.entry("/api/v1/staff/auth/reset-password", new RateLimit(10, Duration.ofHours(1))),
+            Map.entry("/api/v1/reports", new RateLimit(10, Duration.ofHours(1))),
             Map.entry("/api/v1/auth/login", new RateLimit(10, Duration.ofMinutes(1))),
 
             Map.entry("/api/v1/auth/register", new RateLimit(5, Duration.ofHours(1))),
