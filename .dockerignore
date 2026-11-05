@@ -1,0 +1,10 @@
+*
+!pom.xml
+!src/
+!src/**
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.jks
+**/*.p12
