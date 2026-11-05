@@ -15,7 +15,6 @@ import com.makaohub.backend.property.repository.ListingRepository;
 import com.makaohub.backend.property.repository.SublessorListingMediaRepository;
 import com.makaohub.backend.property.repository.SublessorListingRepository;
 import com.makaohub.backend.storage.service.SupabaseStorageClient;
-import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,7 +25,6 @@ import java.util.UUID;
 
 /** Returns video URLs only to a renter with an active listing-specific unlock. */
 @Service
-@Profile("mock")
 public class RenterListingVideoAccessService {
 
     private final UserRepository userRepository;
