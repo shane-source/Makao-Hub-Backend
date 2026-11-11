@@ -1,5 +1,7 @@
 # Kenyan national-ID content screening
 
+> Current security note (5 November 2026): ClamAV was removed at the owner's request. OCR, image format/size checks, and metadata-stripping re-encoding remain; ID uploads are **not malware-scanned**. References below to ClamAV describe the earlier implementation, not the current deployment behavior.
+
 ## Scope and limits
 
 New ID-front/back confirmations for Landlord, Sublessor and Renter must pass local OCR

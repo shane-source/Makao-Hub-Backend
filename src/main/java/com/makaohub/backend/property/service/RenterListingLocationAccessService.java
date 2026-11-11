@@ -17,7 +17,6 @@ import com.makaohub.backend.property.repository.ListingLocationRepository;
 import com.makaohub.backend.property.repository.ListingRepository;
 import com.makaohub.backend.property.repository.SublessorListingLocationRepository;
 import com.makaohub.backend.property.repository.SublessorListingRepository;
-import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,7 +26,6 @@ import java.util.UUID;
 
 /** Enforces renter ownership of the paid exact-location entitlement per request. */
 @Service
-@Profile("mock")
 public class RenterListingLocationAccessService {
 
     private final UserRepository userRepository;

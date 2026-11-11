@@ -18,7 +18,9 @@ public class StompDestinationAuthorizationInterceptor
     private static final Set<String> ALLOWED_SEND_DESTINATIONS =
             Set.of(
                     "/app/chat.send",
-                    "/app/rental-chat.send"
+                    "/app/rental-chat.send",
+                    "/app/chat.delivered",
+                    "/app/rental-chat.delivered"
             );
 
     private static final Set<String> ALLOWED_SUBSCRIBE_DESTINATIONS =

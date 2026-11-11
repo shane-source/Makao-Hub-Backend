@@ -32,7 +32,8 @@ class StaffInvitationResendIntegrationTest {
         assertTrue(url.matches("jdbc:postgresql://(127\\.0\\.0\\.1|localhost):[0-9]+/makao_role_test"));
         String schema="staff_resend_test_"+UUID.randomUUID().toString().replace("-","");
         var source=new DriverManagerDataSource(url+"?currentSchema="+schema,
-                System.getenv().getOrDefault("MAKAO_ROLE_TEST_DB_USER","hp"),"");
+                System.getenv().getOrDefault("MAKAO_ROLE_TEST_DB_USER","hp"),
+                System.getenv().getOrDefault("MAKAO_ROLE_TEST_DB_PASSWORD",""));
         Flyway.configure().dataSource(source).schemas(schema).defaultSchema(schema).load().migrate();
         var sql=new JdbcTemplate(source);
         var db=new AdminStore(sql);

@@ -236,6 +236,16 @@ public class RentalChatMessage {
         return createdAt;
     }
 
+    @Column(name = "delivered_at")
+    private Instant deliveredAt;
+
+    public Instant getDeliveredAt() { return deliveredAt; }
+
+    /** Called only after recipient authorization, under a message-row lock. Preserve the first ACK. */
+    public void confirmDelivery(Instant now) {
+        if (deliveredAt == null) deliveredAt = Objects.requireNonNull(now);
+    }
+
     public boolean isFlagged() {
         return moderationStatus == MessageModerationStatus.FLAGGED;
     }

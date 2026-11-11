@@ -64,6 +64,23 @@ public class MockPaymentAuditService {
     }
 
     @Transactional
+    public void recordMoveInResponse(PaymentIntent intent, Booking booking, boolean accepted) {
+        record(intent, booking, accepted ? PaymentAuditEventType.MOVE_IN_ACCEPTED : PaymentAuditEventType.MOVE_IN_REJECTED,
+                booking.getRenterId());
+    }
+
+    @Transactional
+    public void recordOwnerMoveInConfirmed(PaymentIntent intent, Booking booking) {
+        record(intent, booking, PaymentAuditEventType.OWNER_MOVE_IN_CONFIRMED, booking.getOwnerId());
+    }
+
+    /** Keeps the owner's review signal append-only and separate from payout approval. */
+    @Transactional
+    public void recordOwnerReleaseReviewRequested(PaymentIntent intent, Booking booking) {
+        record(intent, booking, PaymentAuditEventType.OWNER_RELEASE_REVIEW_REQUESTED, booking.getOwnerId());
+    }
+
+    @Transactional
     public void recordPaymentDisputed(PaymentIntent intent) {
         record(intent, null, PaymentAuditEventType.PAYMENT_DISPUTED);
     }

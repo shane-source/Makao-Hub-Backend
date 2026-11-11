@@ -21,13 +21,25 @@ public record BookingResponse(
         Instant renterAgreedAt,
         Instant ownerAgreedAt,
         Instant moveInConfirmedAt,
+        Instant ownerMoveInConfirmedAt,
         Instant releaseEligibleAt,
+        Instant ownerReleaseRequestedAt,
         Instant releasedAt,
         String payoutReference,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String renterName,
+        String ownerName,
+        Boolean moveInAccepted,
+        Instant moveInAnsweredAt,
+        String testPayoutStatus
 ) {
     public static BookingResponse from(Booking booking) {
+        return from(booking, null, null);
+    }
+
+    /** Names are supplied only for the owner-scoped booking endpoint. */
+    public static BookingResponse from(Booking booking, String renterName, String ownerName) {
         return new BookingResponse(
                 booking.getId(),
                 booking.getListingId(),
@@ -42,11 +54,16 @@ public record BookingResponse(
                 booking.getRenterAgreedAt(),
                 booking.getOwnerAgreedAt(),
                 booking.getMoveInConfirmedAt(),
+                booking.getOwnerMoveInConfirmedAt(),
                 booking.getReleaseEligibleAt(),
+                booking.getOwnerReleaseRequestedAt(),
                 booking.getReleasedAt(),
                 booking.getPayoutReference(),
                 booking.getCreatedAt(),
-                booking.getUpdatedAt()
+                booking.getUpdatedAt(),
+                renterName,
+                ownerName,
+                booking.getMoveInAccepted(), booking.getMoveInAnsweredAt(), booking.getTestPayoutStatus()
         );
     }
 }

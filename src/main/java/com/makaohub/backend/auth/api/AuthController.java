@@ -85,6 +85,11 @@ public class AuthController {
         return authOtpService.verifyLogin(request.parsedChallengeId(), request.code());
     }
 
+    @PostMapping("/reactivate/verify-otp")
+    public AuthTokensResponse verifyReactivationOtp(@Valid @RequestBody OtpVerifyRequest request) {
+        return authOtpService.verifyReactivation(request.parsedChallengeId(), request.code());
+    }
+
     @PostMapping("/forgot-password")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public PasswordResetAcceptedResponse forgotPassword(
@@ -133,9 +138,7 @@ public class AuthController {
             @Valid @RequestBody GoogleAuthRequest request
     ) {
         requirePublicLoginRole(request.expectedRole());
-        return authOtpService.startLogin(
-                googleAuthenticationService.verifyIdentity(request.idToken(), request.expectedRole())
-        );
+        return googleAuthenticationService.startLogin(request.idToken(), request.expectedRole());
     }
 
     private void requirePublicLoginRole(RoleName expectedRole) {

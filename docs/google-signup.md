@@ -1,8 +1,28 @@
-# Google signup without requiring the phone field
+# Google signup
+
+## Current behavior (3 November 2026)
+
+Google signup now requires the number entered in the existing registration form.
+Accounts created earlier without a number are prompted to complete it after sign-in.
+See `/home/hp/Desktop/makao-hub-backend/docs/google-phone-required.md` for the
+current contract, security walkthrough, test results and remaining limitations.
+No missing number is fabricated or backfilled. Google-only password hashes and
+optional avatar paths remain nullable by design.
+
+## Historical phone-optional implementation (superseded)
+
+The notes below explain V57 and older behavior, not the current signup contract.
+V57 remains applied and unchanged to preserve existing accounts until their users
+provide actual numbers. Do not edit that migration or run the old device steps below.
 
 Normal signup retains its phone field and validation. Continue with Google ignores
 that field. The selected role, Google token and consent still go to the backend;
 email OTP and role verification still follow. A missing phone is never fabricated.
+
+Existing email/password accounts can now use **Sign in → Continue with Google**.
+The matching Google account is linked only after the existing inbox OTP succeeds;
+Google registration still rejects duplicate accounts. See
+`/home/hp/Desktop/makao-hub-backend/docs/google-account-linking.md` for that flow.
 
 ## Files, methods and connections
 

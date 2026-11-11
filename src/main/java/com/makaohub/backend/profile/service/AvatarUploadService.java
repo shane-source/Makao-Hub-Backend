@@ -7,6 +7,8 @@ import com.makaohub.backend.auth.repository.UserRepository;
 import com.makaohub.backend.profile.api.AvatarUploadUrlResponse;
 import com.makaohub.backend.storage.config.UploadSecurityProperties;
 import com.makaohub.backend.storage.service.SupabaseStorageClient;
+import com.makaohub.backend.verification.service.VerificationImageValidator;
+import com.makaohub.backend.verification.domain.VerificationDocumentType;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,15 +28,18 @@ public class AvatarUploadService {
     private final UserRepository userRepository;
     private final SupabaseStorageClient storageClient;
     private final UploadSecurityProperties uploadLimits;
+    private final VerificationImageValidator imageValidator;
 
     public AvatarUploadService(
             UserRepository userRepository,
             SupabaseStorageClient storageClient,
-            UploadSecurityProperties uploadLimits
+            UploadSecurityProperties uploadLimits,
+            VerificationImageValidator imageValidator
     ) {
         this.userRepository = userRepository;
         this.storageClient = storageClient;
         this.uploadLimits = uploadLimits;
+        this.imageValidator = imageValidator;
     }
 
     @Transactional(readOnly = true)
@@ -83,7 +88,19 @@ public class AvatarUploadService {
             throw invalidAvatarUpload();
         }
 
-        user.changeAvatarObjectPath(objectPath);
+        if (!java.util.List.of("image/jpeg", "image/png").contains(objectInfo.contentType())) throw invalidAvatarUpload();
+        String cleanPath = user.getId() + "/" + UUID.randomUUID() + extensionOf(objectPath);
+        byte[] original = storageClient.readAvatar(objectPath, objectInfo.sizeBytes());
+        try {
+            if (original == null || original.length != objectInfo.sizeBytes()) throw invalidAvatarUpload();
+            byte[] clean = imageValidator.prepare(original, objectInfo.contentType(), VerificationDocumentType.SELFIE);
+            try {
+                if (clean.length > uploadLimits.avatarMaxBytes()) throw invalidAvatarUpload();
+                storageClient.storePreparedAvatar(cleanPath, objectInfo.contentType(), clean);
+            } finally { java.util.Arrays.fill(clean, (byte) 0); }
+        } finally { if (original != null) java.util.Arrays.fill(original, (byte) 0); }
+        storageClient.deleteUnconfirmedAvatar(objectPath);
+        user.changeAvatarObjectPath(cleanPath);
     }
 
     private User activeUser(UUID authenticatedUserId) {
@@ -130,7 +147,6 @@ public class AvatarUploadService {
         return switch (contentType) {
             case "image/jpeg" -> ".jpg";
             case "image/png" -> ".png";
-            case "image/webp" -> ".webp";
             default -> throw invalidAvatarUpload();
         };
     }

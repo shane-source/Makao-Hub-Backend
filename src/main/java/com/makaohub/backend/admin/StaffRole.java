@@ -3,7 +3,7 @@ package com.makaohub.backend.admin;
 public enum StaffRole {
     STAFF_LEAD, VERIFICATION_REVIEWER, SAFETY_MODERATOR, PAYMENT_REVIEWER;
 
-    public enum Permission { STAFF, ASSIGN_VERIFICATION, VERIFICATION, LISTING_MODERATION, SAFETY, SAFETY_VIEW, PAYMENTS, PAYMENTS_VIEW, AUDIT }
+    public enum Permission { STAFF, ASSIGN_VERIFICATION, VERIFICATION, LISTING_MODERATION, SAFETY, SAFETY_VIEW, PAYMENTS, PAYMENTS_VIEW, TEST_RELEASE, AUDIT }
 
     public boolean permits(Permission permission) {
         return switch (permission) {
@@ -14,6 +14,7 @@ public enum StaffRole {
             case SAFETY_VIEW -> this == STAFF_LEAD || this == SAFETY_MODERATOR;
             case PAYMENTS -> this == PAYMENT_REVIEWER;
             case PAYMENTS_VIEW -> this == STAFF_LEAD || this == PAYMENT_REVIEWER;
+            case TEST_RELEASE -> this == STAFF_LEAD || this == PAYMENT_REVIEWER;
             case AUDIT -> this == STAFF_LEAD;
         };
     }

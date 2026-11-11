@@ -10,6 +10,7 @@ import com.makaohub.backend.auth.exception.OtpProviderException;
 import com.makaohub.backend.auth.repository.AuthOtpChallengeRepository;
 import com.makaohub.backend.auth.repository.RefreshTokenRepository;
 import com.makaohub.backend.auth.repository.UserRepository;
+import com.makaohub.backend.auth.repository.GoogleIdentityRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,6 +45,7 @@ public class AuthOtpService {
     private final AuthenticationTokenService authenticationTokenService;
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
+    private final GoogleIdentityRepository googleIdentities;
 
     public AuthOtpService(
             AuthOtpChallengeRepository challengeRepository,
@@ -53,7 +55,8 @@ public class AuthOtpService {
             EmailOtpClient emailOtpClient,
             AuthenticationTokenService authenticationTokenService,
             PasswordEncoder passwordEncoder,
-            Clock clock
+            Clock clock,
+            GoogleIdentityRepository googleIdentities
     ) {
         this.challengeRepository = challengeRepository;
         this.userRepository = userRepository;
@@ -63,11 +66,64 @@ public class AuthOtpService {
         this.authenticationTokenService = authenticationTokenService;
         this.passwordEncoder = passwordEncoder;
         this.clock = clock;
+        this.googleIdentities = googleIdentities;
     }
 
     @Transactional
     public OtpChallengeResponse startLogin(User user) {
-        return issue(user, AuthOtpChallengePurpose.LOGIN);
+        return issue(user, user.getAccountStatus() == AccountStatus.DEACTIVATED
+                ? AuthOtpChallengePurpose.REACTIVATION : AuthOtpChallengePurpose.LOGIN);
+    }
+
+    @Transactional
+    public OtpChallengeResponse startGoogleLogin(User user, String subject) {
+        if (subject == null || subject.isBlank() || subject.length() > 255) {
+            throw new AuthException(AuthException.Reason.INVALID_CREDENTIALS, "Google authentication failed.");
+        }
+        return issue(user, user.getAccountStatus() == AccountStatus.DEACTIVATED
+                ? AuthOtpChallengePurpose.REACTIVATION : AuthOtpChallengePurpose.LOGIN, subject);
+    }
+
+    @Transactional
+    public OtpChallengeResponse startAccountAction(User user, AuthOtpChallengePurpose purpose) {
+        if (purpose != AuthOtpChallengePurpose.ACCOUNT_DEACTIVATION
+                && purpose != AuthOtpChallengePurpose.ACCOUNT_DELETION) throw invalidOtp();
+        return issue(user, purpose);
+    }
+
+    /** The caller owns the state change in the same transaction after checking financial blockers. */
+    @Transactional(noRollbackFor = AuthException.class)
+    public User verifyAccountAction(UUID userId, UUID challengeId, String code, AuthOtpChallengePurpose purpose) {
+        if (purpose != AuthOtpChallengePurpose.ACCOUNT_DEACTIVATION
+                && purpose != AuthOtpChallengePurpose.ACCOUNT_DELETION
+                || !userId.equals(challengeRepository.findUserIdByChallengeId(challengeId).orElse(null))) throw invalidOtp();
+        User user = userRepository.findByIdForUpdate(userId).orElseThrow(this::invalidOtp);
+        AuthOtpChallenge challenge = challengeRepository.findByIdForUpdate(challengeId).orElseThrow(this::invalidOtp);
+        Instant now = Instant.now(clock);
+        ensureUsable(challenge, now, purpose);
+        ensureUserCurrent(user, challenge);
+        verifyCodeOrFail(challenge, user, code, now);
+        challenge.markVerified(now);
+        return user;
+    }
+
+    @Transactional(noRollbackFor = AuthException.class)
+    public AuthTokensResponse verifyReactivation(UUID challengeId, String code) {
+        UUID userId = challengeRepository.findUserIdByChallengeId(challengeId).orElseThrow(this::invalidOtp);
+        User user = userRepository.findByIdForUpdate(userId).orElseThrow(this::invalidOtp);
+        AuthOtpChallenge challenge = challengeRepository.findByIdForUpdate(challengeId).orElseThrow(this::invalidOtp);
+        Instant now = Instant.now(clock);
+        ensureUsable(challenge, now, AuthOtpChallengePurpose.REACTIVATION);
+        ensureUserCurrent(user, challenge);
+        verifyCodeOrFail(challenge, user, code, now);
+        if (challenge.getPendingGoogleSubject() != null) {
+            ensureGoogleLinkAvailable(user, challenge.getPendingGoogleSubject());
+            if (!googleIdentities.existsById(user.getId()))
+                googleIdentities.saveAndFlush(new GoogleIdentity(user, challenge.getPendingGoogleSubject()));
+        }
+        challenge.markVerified(now);
+        user.changeSelfServiceStatus(AccountStatus.ACTIVE);
+        return authenticationTokenService.issue(user);
     }
 
     @Transactional
@@ -99,6 +155,13 @@ public class AuthOtpService {
         ensureUsable(challenge, now, purpose);
         ensureUserCurrent(user, challenge);
         verifyCodeOrFail(challenge, user, code, now);
+        if (challenge.getPendingGoogleSubject() != null) {
+            ensureGoogleLinkAvailable(user, challenge.getPendingGoogleSubject());
+            if (!googleIdentities.existsById(user.getId())) {
+                // User-row lock serializes linking; unique subject/user constraints prevent reassignment.
+                googleIdentities.saveAndFlush(new GoogleIdentity(user, challenge.getPendingGoogleSubject()));
+            }
+        }
         challenge.markVerified(now);
         return authenticationTokenService.issue(user);
     }
@@ -138,16 +201,24 @@ public class AuthOtpService {
     }
 
     private OtpChallengeResponse issue(User user, AuthOtpChallengePurpose purpose) {
-        if (user.getAccountStatus() != AccountStatus.ACTIVE || user.getId() == null) throw invalidOtp();
+        return issue(user, purpose, null);
+    }
+
+    private OtpChallengeResponse issue(User user, AuthOtpChallengePurpose purpose, String googleSubject) {
+        AccountStatus requiredStatus = purpose == AuthOtpChallengePurpose.REACTIVATION
+                ? AccountStatus.DEACTIVATED : AccountStatus.ACTIVE;
+        if (user.getAccountStatus() != requiredStatus || user.getId() == null) throw invalidOtp();
         User current = userRepository.findByIdForUpdate(user.getId()).orElseThrow(this::invalidOtp);
         if (current.getAuthorizationVersion() != user.getAuthorizationVersion()
-                || current.getAccountStatus() != AccountStatus.ACTIVE || current.isRoleSelectionRequired()) throw invalidOtp();
+                || current.getAccountStatus() != requiredStatus || current.isRoleSelectionRequired()) throw invalidOtp();
+        if (googleSubject != null) ensureGoogleLinkAvailable(current, googleSubject);
         Instant now = Instant.now(clock);
         if (challengeRepository.countByUser_IdAndPurposeAndIssuedAtAfter(current.getId(), purpose, now.minus(SEND_WINDOW)) >= MAX_SENDS_IN_WINDOW) {
             throw new AuthException(AuthException.Reason.OTP_RATE_LIMITED, "Too many verification codes were requested. Try again later.");
         }
         String code = String.format(Locale.ROOT, "%06d", random.nextInt(1_000_000));
         AuthOtpChallenge challenge = new AuthOtpChallenge(current, purpose, current.getAuthorizationVersion(), now, now.plus(CHALLENGE_TTL));
+        if (googleSubject != null) challenge.bindGoogleSubject(googleSubject);
         challenge.setCodeDigest(digest(challenge, current, code));
         // Only supersede the previous challenge after SMTP accepted the email.
         // No automatic retry: a timeout may conceal acceptance.
@@ -171,12 +242,24 @@ public class AuthOtpService {
     private String digest(AuthOtpChallenge challenge, User user, String code) {
         String boundCode = "makao:email-otp:v1\n" + challenge.getId() + "\n" + user.getId() + "\n"
                 + challenge.getPurpose() + "\n" + challenge.getAuthorizationVersion() + "\n" + user.getEmail() + "\n" + code;
+        // Preserve existing outstanding codes, but bind new Google challenges to the verified subject.
+        if (challenge.getPendingGoogleSubject() != null) boundCode += "\ngoogle:" + challenge.getPendingGoogleSubject();
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(otpKey);
             return HexFormat.of().formatHex(mac.doFinal(boundCode.getBytes(StandardCharsets.UTF_8)));
         } catch (GeneralSecurityException unavailable) {
             throw new IllegalStateException("OTP cryptography is unavailable.");
+        }
+    }
+
+    private void ensureGoogleLinkAvailable(User user, String subject) {
+        var byUser = googleIdentities.findById(user.getId());
+        var bySubject = googleIdentities.findByGoogleSubject(subject);
+        if (byUser.filter(link -> !link.getGoogleSubject().equals(subject)).isPresent()
+                || bySubject.filter(link -> !link.getUser().getId().equals(user.getId())).isPresent()) {
+            throw new AuthException(AuthException.Reason.INVALID_CREDENTIALS,
+                    "Google authentication failed. Use your existing sign-in method.");
         }
     }
 
@@ -189,7 +272,9 @@ public class AuthOtpService {
     }
 
     private void ensureUserCurrent(User user, AuthOtpChallenge challenge) {
-        if (user.getAccountStatus() != AccountStatus.ACTIVE || user.isRoleSelectionRequired()
+        AccountStatus requiredStatus = challenge.getPurpose() == AuthOtpChallengePurpose.REACTIVATION
+                ? AccountStatus.DEACTIVATED : AccountStatus.ACTIVE;
+        if (user.getAccountStatus() != requiredStatus || user.isRoleSelectionRequired()
                 || !user.getId().equals(challenge.getUser().getId())
                 || user.getAuthorizationVersion() != challenge.getAuthorizationVersion()) throw invalidOtp();
     }

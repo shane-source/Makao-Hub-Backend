@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 import java.util.UUID;
+import java.util.List;
 @RestController
 @RequestMapping("/api/v1/renter/bookings")
 public class RenterBookingQueryController {
@@ -19,14 +20,23 @@ public class RenterBookingQueryController {
     public RenterBookingQueryController(BookingRepository bookings,UserRepository users,UserRoleRepository roles) {
         this.bookings=bookings; this.users=users; this.roles=roles;
     }
+    @GetMapping public List<BookingResponse> mine(@AuthenticationPrincipal Jwt jwt) {
+        UUID actor = renter(jwt);
+        return bookings.findTop50ByRenterIdOrderByCreatedAtDesc(actor).stream().map(BookingResponse::from).toList();
+    }
     @GetMapping("/{id}") public BookingResponse one(@AuthenticationPrincipal Jwt jwt,@PathVariable UUID id) {
+        UUID actor = renter(jwt);
+        return BookingResponse.from(bookings.findByIdAndRenterId(id,actor)
+            .orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Booking unavailable.")));
+    }
+    private UUID renter(Jwt jwt) {
         UUID actor;
         try { if(jwt==null) throw new IllegalArgumentException(); actor=UUID.fromString(jwt.getSubject()); }
         catch(IllegalArgumentException|NullPointerException failure) { throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Valid authentication required."); }
-        if(users.findById(actor).filter(u->u.getAccountStatus()==AccountStatus.ACTIVE).isEmpty()
+        if(jwt.getClaimAsStringList("roles")==null || !jwt.getClaimAsStringList("roles").equals(List.of("RENTER"))
+            || users.findById(actor).filter(u->u.getAccountStatus()==AccountStatus.ACTIVE).isEmpty()
             || !roles.existsByUser_IdAndRole_Name(actor,RoleName.RENTER))
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Renter access required.");
-        return BookingResponse.from(bookings.findByIdAndRenterId(id,actor)
-            .orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Booking unavailable.")));
+        return actor;
     }
 }

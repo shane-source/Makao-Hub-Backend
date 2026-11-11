@@ -25,17 +25,20 @@ public class LandlordApplicationService {
     private final UserRoleRepository userRoleRepository;
     private final ListingRepository listingRepository;
     private final RentalApplicationRepository applicationRepository;
+    private final ApplicationApplicantDetails applicantDetails;
 
     public LandlordApplicationService(
             UserRepository userRepository,
             UserRoleRepository userRoleRepository,
             ListingRepository listingRepository,
-            RentalApplicationRepository applicationRepository
+            RentalApplicationRepository applicationRepository,
+            ApplicationApplicantDetails applicantDetails
     ) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
         this.listingRepository = listingRepository;
         this.applicationRepository = applicationRepository;
+        this.applicantDetails = applicantDetails;
     }
 
     @Transactional(readOnly = true)
@@ -140,13 +143,15 @@ public class LandlordApplicationService {
     private RentalApplicationResponse toResponse(
             RentalApplication application
     ) {
+        var applicant = applicantDetails.forApplicant(application.getRenterId());
         return new RentalApplicationResponse(
                 application.getId(),
                 application.getListingId(),
                 application.getStatus(),
                 application.getCreatedAt(),
                 application.getUpdatedAt(),
-                application.getRejectionReason()
+                application.getRejectionReason(),
+                applicant.name, applicant.avatarUrl, applicant.verificationStatus
         );
     }
 

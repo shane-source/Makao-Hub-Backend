@@ -78,7 +78,7 @@ public class PaymentIntentService {
                 command.payerUserId(), command.paymentType(), command.listingId(),
                 command.bookingId(), command.targetKind(), command.amountMinor(),
                 command.currency(),
-                command.idempotencyKey()
+                command.idempotencyKey(), command.offerCode()
         );
         intent = paymentIntentRepository.save(intent);
         intent.markPending(paymentProvider.start(intent));
@@ -150,7 +150,8 @@ public class PaymentIntentService {
                 && Objects.equals(intent.getListingId(), command.listingId())
                 && Objects.equals(intent.getBookingId(), command.bookingId())
                 && intent.getAmountMinor() == command.amountMinor()
-                && intent.getCurrency().equalsIgnoreCase(command.currency());
+                && intent.getCurrency().equalsIgnoreCase(command.currency())
+                && Objects.equals(intent.getOfferCode(), command.offerCode());
     }
 
     private static boolean requiresVerifiedRenter(PaymentType paymentType) {
@@ -168,8 +169,15 @@ public class PaymentIntentService {
             PaymentTargetKind targetKind,
             long amountMinor,
             String currency,
-            String idempotencyKey
+            String idempotencyKey,
+            String offerCode
     ) {
+        public CreatePaymentCommand(UUID payerUserId, PaymentType paymentType, UUID listingId,
+                UUID bookingId, PaymentTargetKind targetKind, long amountMinor,
+                String currency, String idempotencyKey) {
+            this(payerUserId, paymentType, listingId, bookingId, targetKind,
+                    amountMinor, currency, idempotencyKey, null);
+        }
         public CreatePaymentCommand {
             Objects.requireNonNull(payerUserId, "Payer user ID is required.");
             Objects.requireNonNull(paymentType, "Payment type is required.");

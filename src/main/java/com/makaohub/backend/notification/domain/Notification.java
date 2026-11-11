@@ -25,6 +25,8 @@ public class Notification {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
+    @Column(name = "booking_id") private UUID bookingId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 40)
     private NotificationType type;
@@ -58,7 +60,7 @@ public class Notification {
     }
 
     public void markRead() {
-        readAt = Instant.now();
+        if (readAt == null) readAt = Instant.now();
     }
 
     public UUID getId() {
@@ -68,6 +70,7 @@ public class Notification {
     public UUID getUserId() {
         return userId;
     }
+    public UUID getBookingId() { return bookingId; }
 
     public NotificationType getType() {
         return type;

@@ -20,6 +20,7 @@ import com.makaohub.backend.verification.domain.RoleVerification;
 import com.makaohub.backend.verification.domain.VerificationStatus;
 import com.makaohub.backend.verification.repository.RoleVerificationRepository;
 import com.makaohub.backend.storage.service.SupabaseStorageClient;
+import com.makaohub.backend.payment.service.LandlordOfferService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +39,7 @@ public class LandlordListingService {
     private final ListingMediaRepository mediaRepository;
     private final RoleVerificationRepository verificationRepository;
     private final SupabaseStorageClient storageClient;
+    private final LandlordOfferService offers;
 
     public LandlordListingService(
             UserRepository userRepository,
@@ -46,7 +48,8 @@ public class LandlordListingService {
             ListingLocationRepository locationRepository,
             ListingMediaRepository mediaRepository,
             RoleVerificationRepository verificationRepository,
-            SupabaseStorageClient storageClient
+            SupabaseStorageClient storageClient,
+            LandlordOfferService offers
     ) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
@@ -55,6 +58,7 @@ public class LandlordListingService {
         this.mediaRepository = mediaRepository;
         this.verificationRepository = verificationRepository;
         this.storageClient = storageClient;
+        this.offers = offers;
     }
 
     @Transactional
@@ -261,6 +265,8 @@ public class LandlordListingService {
             );
         }
 
+        offers.requirePublicationSlot(authenticatedUserId);
+
         try {
             listing.publish();
         } catch (IllegalStateException exception) {
@@ -313,6 +319,9 @@ public class LandlordListingService {
                 )
                 .orElseThrow(LandlordListingService::listingNotFound);
 
+        if (listing.getStatus() == ListingStatus.PAUSED) {
+            offers.requirePublicationSlot(authenticatedUserId);
+        }
         try {
             listing.resume();
         } catch (IllegalStateException exception) {

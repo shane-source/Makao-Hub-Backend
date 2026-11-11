@@ -65,17 +65,34 @@ class LandlordApplicationRejectionTest {
         assertEquals("UNDER_REVIEW", application.getStatus().name());
     }
 
+    @Test void anotherLandlordCannotAccessApplicantDetailsThroughDecision() {
+        Fixture fixture = new Fixture();
+        UUID landlordId = UUID.randomUUID(), listingId = UUID.randomUUID(), applicationId = UUID.randomUUID();
+        fixture.activeLandlord(landlordId);
+        when(fixture.applications.findById(applicationId)).thenReturn(Optional.of(new RentalApplication(UUID.randomUUID(), listingId)));
+        when(fixture.listings.findByIdAndLandlordId(listingId, landlordId)).thenReturn(Optional.empty());
+        assertThrows(ResponseStatusException.class, () -> fixture.service.markUnderReview(landlordId, applicationId));
+        org.mockito.Mockito.verifyNoInteractions(fixture.applicantDetails);
+    }
+
     private static final class Fixture {
         private final UserRepository users = mock(UserRepository.class);
         private final UserRoleRepository roles = mock(UserRoleRepository.class);
         private final ListingRepository listings = mock(ListingRepository.class);
         private final RentalApplicationRepository applications = mock(RentalApplicationRepository.class);
+        private final ApplicationApplicantDetails applicantDetails = mock(ApplicationApplicantDetails.class);
         private final LandlordApplicationService service = new LandlordApplicationService(
                 users,
                 roles,
                 listings,
-                applications
+                applications,
+                applicantDetails
         );
+
+        private Fixture() {
+            when(applicantDetails.forApplicant(org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(new ApplicationApplicantDetails.Details(null, null, null));
+        }
 
         private void activeLandlord(UUID landlordId) {
             User user = mock(User.class);

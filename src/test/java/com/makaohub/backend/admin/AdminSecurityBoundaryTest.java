@@ -1,6 +1,9 @@
 package com.makaohub.backend.admin;
 
 import com.makaohub.backend.auth.config.SecurityConfig;
+import com.makaohub.backend.payment.api.MockEscrowReleaseController;
+import com.makaohub.backend.payment.paystack.config.PaystackProperties;
+import com.makaohub.backend.renter.service.BookingAgreementService;
 import com.makaohub.backend.storage.config.UploadSecurityProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -8,6 +11,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import java.util.*;
 import static org.mockito.Mockito.*;
@@ -19,7 +23,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 
-@WebMvcTest(AdminController.class)
+@ActiveProfiles("mock")
+@WebMvcTest({AdminController.class, MockEscrowReleaseController.class})
 @Import(SecurityConfig.class)
 class AdminSecurityBoundaryTest {
     @Autowired MockMvc mvc;
@@ -29,6 +34,8 @@ class AdminSecurityBoundaryTest {
     @MockitoBean UserReportService reports;
     @MockitoBean JwtDecoder decoder;
     @MockitoBean UploadSecurityProperties uploads;
+    @MockitoBean PaystackProperties paystackProperties;
+    @MockitoBean BookingAgreementService bookingAgreementService;
 
     @Test void unauthenticatedRequestCannotReadAdminQueues() throws Exception {
         mvc.perform(get("/api/v1/admin/verifications")).andExpect(status().isUnauthorized());
@@ -45,9 +52,20 @@ class AdminSecurityBoundaryTest {
         when(work.verificationQueue(any(),any(),any(),any(),anyInt(),anyInt())).thenReturn(new AdminStore.Page(List.of(),0,20,false));
         mvc.perform(get("/api/v1/admin/verifications").with(jwt().jwt(j->j.claim("roles",List.of("ADMIN")))))
                 .andExpect(status().isOk());
-        mvc.perform(post("/api/v1/admin/payments/bookings/"+UUID.randomUUID()+"/release")
+        mvc.perform(post("/api/v1/admin/payments/bookings/"+UUID.randomUUID()+"/refund")
                         .with(jwt().jwt(j->j.claim("roles",List.of("ADMIN")))))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test void testReleaseRouteRequiresStaffMfaAndAnIdempotencyKey() throws Exception {
+        String path = "/api/v1/admin/payments/bookings/" + UUID.randomUUID() + "/release";
+        when(access.allows(any())).thenReturn(false);
+        mvc.perform(post(path).with(jwt().jwt(j->j.claim("roles",List.of("ADMIN")))))
+                .andExpect(status().isForbidden());
+        when(access.allows(any())).thenReturn(true);
+        mvc.perform(post(path).with(jwt().jwt(j->j.claim("roles",List.of("ADMIN")))))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(bookingAgreementService);
     }
 
     @Test void authenticatedListingMediaIsInlinePrivateAndNotCacheable() throws Exception {

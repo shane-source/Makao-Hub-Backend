@@ -42,7 +42,8 @@ class ListingUnlockEntitlementServiceTest {
                 .thenReturn(Optional.empty(), Optional.of(org.mockito.Mockito.mock(ListingUnlockEntitlement.class)));
 
         ListingUnlockEntitlementService service =
-                new ListingUnlockEntitlementService(repository);
+                new ListingUnlockEntitlementService(repository,
+                        org.mockito.Mockito.mock(com.makaohub.backend.payment.service.LandlordOfferService.class));
         service.activateForSuccessfulPayment(intent);
         service.activateForSuccessfulPayment(intent);
 
@@ -58,7 +59,8 @@ class ListingUnlockEntitlementServiceTest {
         PaymentIntent intent = org.mockito.Mockito.mock(PaymentIntent.class);
         when(intent.getStatus()).thenReturn(PaymentStatus.FAILED);
 
-        new ListingUnlockEntitlementService(repository)
+        new ListingUnlockEntitlementService(repository,
+                org.mockito.Mockito.mock(com.makaohub.backend.payment.service.LandlordOfferService.class))
                 .activateForSuccessfulPayment(intent);
 
         verify(repository, times(0)).save(any(ListingUnlockEntitlement.class));

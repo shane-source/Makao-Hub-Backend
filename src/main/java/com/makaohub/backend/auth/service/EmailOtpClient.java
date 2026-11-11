@@ -46,6 +46,9 @@ public class EmailOtpClient {
             case REGISTRATION -> "complete your registration";
             case LOGIN -> "sign in";
             case PASSWORD_RESET -> "reset your password";
+            case ACCOUNT_DEACTIVATION -> "deactivate your account";
+            case ACCOUNT_DELETION -> "request account deletion";
+            case REACTIVATION -> "reactivate your account";
         };
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(from);

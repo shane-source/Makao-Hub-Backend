@@ -38,6 +38,7 @@ class SublessorApplicationReviewTest {
     private SublessorRentalApplicationRepository applications;
     private SublessorApplicationReviewService service;
     private SublessorRentalApplication application;
+    private ApplicationApplicantDetails applicantDetails;
 
     @BeforeEach
     void setUp() {
@@ -45,12 +46,15 @@ class SublessorApplicationReviewTest {
         roles = mock(UserRoleRepository.class);
         listings = mock(SublessorListingRepository.class);
         applications = mock(SublessorRentalApplicationRepository.class);
+        applicantDetails = mock(ApplicationApplicantDetails.class);
+        when(applicantDetails.forApplicant(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new ApplicationApplicantDetails.Details(null, null, null));
         service = new SublessorApplicationReviewService(
                 users,
                 roles,
                 listings,
                 applications,
-                mock(NotificationService.class)
+                mock(NotificationService.class), applicantDetails
         );
 
         application = new SublessorRentalApplication(renterId, listingId);
@@ -95,6 +99,7 @@ class SublessorApplicationReviewTest {
 
         assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
         assertEquals(RentalApplicationStatus.SUBMITTED, application.getStatus());
+        org.mockito.Mockito.verifyNoInteractions(applicantDetails);
     }
 
     @Test

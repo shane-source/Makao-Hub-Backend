@@ -31,7 +31,7 @@ public class RenterHomeController {
         return homes.one(actor(jwt),source,id);
     }
     @GetMapping("/{source}/{id}/photos") public List<PublicListingMediaResponse> photos(@AuthenticationPrincipal Jwt jwt,@PathVariable String source,@PathVariable UUID id) {
-        homes.one(actor(jwt),source,id); // Recheck current publication/verified owner before minting capabilities.
+        homes.available(actor(jwt),source,id); // Recheck visibility without counting a photo request as a view.
         return source.equals("LANDLORD")?landlord.findPublishedMedia(id):sublessor.findPublishedMedia(id);
     }
     @PutMapping("/{source}/{id}/save") @ResponseStatus(HttpStatus.NO_CONTENT)

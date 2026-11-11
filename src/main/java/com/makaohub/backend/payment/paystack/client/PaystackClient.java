@@ -1,7 +1,9 @@
 package com.makaohub.backend.payment.paystack.client;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.makaohub.backend.payment.paystack.config.PaystackProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -9,6 +11,7 @@ import org.springframework.web.client.RestClientResponseException;
 
 import java.util.List;
 import java.util.Objects;
+import java.net.URI;
 
 /** Minimal Paystack API client. It never exposes the secret key or provider body. */
 @Service
@@ -17,53 +20,60 @@ public class PaystackClient {
     private final PaystackProperties properties;
     private final RestClient restClient;
 
+    @Autowired
     public PaystackClient(PaystackProperties properties) {
-        this.properties = Objects.requireNonNull(properties);
-        this.restClient = RestClient.builder()
+        this(properties, RestClient.builder()
                 .baseUrl(httpsBaseUrl(properties.baseUrl()))
-                .build();
+                .build());
     }
 
-    public ChargeStart charge(
+    PaystackClient(PaystackProperties properties, RestClient restClient) {
+        this.properties = Objects.requireNonNull(properties);
+        this.restClient = Objects.requireNonNull(restClient);
+    }
+
+    public CheckoutStart initialize(
             String email,
             long amountMinor,
-            String reference,
-            String phoneNumber
+            String reference
     ) {
         requireEnabled();
         if (amountMinor <= 0) {
             throw new IllegalArgumentException("Paystack amount must be positive.");
         }
+        String key = secretKey();
+        String checkoutReturnUrl = properties.validatedCheckoutReturnUrl();
         try {
-            ChargeEnvelope response = restClient.post()
-                    .uri("/charge")
+            CheckoutEnvelope response = restClient.post()
+                    .uri("/transaction/initialize")
                     .headers(headers -> {
-                        headers.setBearerAuth(secretKey());
+                        headers.setBearerAuth(key);
                         headers.setContentType(MediaType.APPLICATION_JSON);
                         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
                     })
-                    .body(new ChargeRequest(
+                    .body(new CheckoutRequest(
                             email,
                             Long.toString(amountMinor),
                             "KES",
-                            new MobileMoney(phoneNumber, "mpesa"),
-                            reference
+                            reference,
+                            List.of("mobile_money"),
+                            checkoutReturnUrl
                     ))
                     .retrieve()
-                    .body(ChargeEnvelope.class);
+                    .body(CheckoutEnvelope.class);
 
             if (response == null || !response.status() || response.data() == null
-                    || response.data().reference() == null
-                    || response.data().reference().isBlank()) {
-                throw new IllegalStateException("Paystack did not create the charge.");
+                    || !reference.equals(response.data().reference())
+                    || !isCheckoutUrl(response.data().authorizationUrl())) {
+                throw new IllegalStateException("Paystack did not return a valid hosted checkout.");
             }
-            return new ChargeStart(
+            return new CheckoutStart(
                     response.data().reference(),
-                    response.data().status(),
-                    response.data().displayText()
+                    response.data().authorizationUrl(),
+                    response.data().accessCode()
             );
         } catch (RestClientResponseException exception) {
-            throw new IllegalStateException("Paystack charge request failed.", exception);
+            throw new IllegalStateException("Paystack checkout initialization failed.", exception);
         }
     }
 
@@ -103,8 +113,8 @@ public class PaystackClient {
 
     private String secretKey() {
         String key = required(properties.secretKey(), "MAKAO_PAYSTACK_SECRET_KEY");
-        if (!key.startsWith("sk_test_") && !key.startsWith("sk_live_")) {
-            throw new IllegalStateException("MAKAO_PAYSTACK_SECRET_KEY is not a Paystack secret key.");
+        if (!key.startsWith("sk_test_")) {
+            throw new IllegalStateException("Only a Paystack test secret key is supported by this test-only payment flow.");
         }
         return key;
     }
@@ -124,7 +134,23 @@ public class PaystackClient {
         return url;
     }
 
-    public record ChargeStart(String reference, String status, String displayText) { }
+    private static boolean isCheckoutUrl(String value) {
+        if (value == null || value.isBlank()) return false;
+        try {
+            URI url = URI.create(value);
+            return "https".equalsIgnoreCase(url.getScheme())
+                    && "checkout.paystack.com".equalsIgnoreCase(url.getHost())
+                    && url.getRawUserInfo() == null
+                    && (url.getPort() == -1 || url.getPort() == 443)
+                    && url.getRawPath() != null
+                    && url.getRawPath().matches("/[A-Za-z0-9-]+")
+                    && url.getRawFragment() == null;
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    public record CheckoutStart(String reference, String authorizationUrl, String accessCode) { }
 
     public record VerificationResult(
             String status,
@@ -133,22 +159,21 @@ public class PaystackClient {
             String currency
     ) { }
 
-    private record ChargeRequest(
+    private record CheckoutRequest(
             String email,
             String amount,
             String currency,
-            @JsonProperty("mobile_money") MobileMoney mobileMoney,
-            String reference
+            String reference,
+            List<String> channels,
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("callback_url") String callbackUrl
     ) { }
 
-    private record MobileMoney(String phone, String provider) { }
+    private record CheckoutEnvelope(boolean status, String message, CheckoutData data) { }
 
-    private record ChargeEnvelope(boolean status, String message, ChargeData data) { }
-
-    private record ChargeData(
+    private record CheckoutData(
             String reference,
-            String status,
-            @JsonProperty("display_text") String displayText
+            @JsonProperty("authorization_url") String authorizationUrl,
+            @JsonProperty("access_code") String accessCode
     ) { }
 
     private record VerifyEnvelope(boolean status, String message, VerifyData data) { }

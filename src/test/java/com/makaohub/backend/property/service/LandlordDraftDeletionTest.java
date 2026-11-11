@@ -133,7 +133,8 @@ class LandlordDraftDeletionTest {
                 locations,
                 media,
                 verifications,
-                storage
+                storage,
+                mock(com.makaohub.backend.payment.service.LandlordOfferService.class)
         );
 
         private void activeLandlord(UUID actor) {

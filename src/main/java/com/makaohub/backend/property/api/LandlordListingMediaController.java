@@ -67,6 +67,14 @@ public class LandlordListingMediaController {
         );
     }
 
+    @GetMapping("/{listingId}/photos")
+    public java.util.List<PublicListingMediaResponse> getListingPhotos(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID listingId
+    ) {
+        return mediaService.findPhotosForOwner(extractUserId(jwt), listingId);
+    }
+
     @DeleteMapping("/{listingId}/media/{mediaId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteMedia(

@@ -100,6 +100,25 @@ public class SupabaseStorageClient {
         return readPrivateObject(properties.verificationBucket(), objectPath, expectedBytes, 10_485_760, Duration.ofSeconds(15));
     }
 
+    /** Bounded private read for validating an owner's uploaded profile photo. */
+    public byte[] readAvatar(String objectPath, long expectedBytes) {
+        return readPrivateObject(properties.avatarBucket(), objectPath, expectedBytes, 10_485_760, Duration.ofSeconds(15));
+    }
+
+    /** Write the cleaned photo to a new path never issued as an upload capability. */
+    public void storePreparedAvatar(String objectPath, String contentType, byte[] prepared) {
+        if (prepared == null || prepared.length == 0 || prepared.length > 10_485_760
+                || !List.of("image/jpeg", "image/png").contains(contentType)) throw invalidEvidence();
+        restClient.post().uri("/object/" + properties.avatarBucket() + "/" + objectPath)
+                .contentType(MediaType.parseMediaType(contentType))
+                .body(prepared).retrieve().toBodilessEntity();
+    }
+
+    public void deleteUnconfirmedAvatar(String objectPath) {
+        try { restClient.delete().uri("/object/" + properties.avatarBucket() + "/" + objectPath).retrieve().toBodilessEntity(); }
+        catch (RestClientResponseException failure) { if (failure.getStatusCode().value() != 404) throw failure; }
+    }
+
     /** Bounded private listing-media download for authenticated staff review. */
     public byte[] readListingMedia(String objectPath, long expectedBytes) {
         return readPrivateObject(properties.listingMediaBucket(), objectPath, expectedBytes, 52_428_800, Duration.ofSeconds(60));

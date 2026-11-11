@@ -62,7 +62,7 @@ public class BookingPaymentService {
             String idempotencyKey
     ) {
         requireActiveRenter(renterId);
-        Booking booking = bookingRepository.findByIdAndRenterId(bookingId, renterId)
+        Booking booking = bookingRepository.findByIdAndRenterIdForUpdate(bookingId, renterId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Booking not found."
                 ));
@@ -80,12 +80,13 @@ public class BookingPaymentService {
         }
 
         if (existingForKey == null) {
-            if (!paymentIntentRepository
+            if (paymentIntentRepository
                     .findAllByPayerUserIdAndBookingId(renterId, bookingId)
-                    .isEmpty()) {
+                    .stream().anyMatch(intent -> intent.getStatus() != PaymentStatus.FAILED
+                            && intent.getStatus() != PaymentStatus.EXPIRED)) {
                 throw new ResponseStatusException(
                         HttpStatus.CONFLICT,
-                        "This booking already has a payment attempt."
+                        "This booking already has an active or completed payment attempt."
                 );
             }
             if (booking.getStatus() != BookingStatus.AWAITING_PAYMENT) {

@@ -307,6 +307,13 @@ public class SublessorVerificationService {
             );
         }
 
+        var front = readyDocuments.stream().filter(document -> document.getDocumentType() == VerificationDocumentType.ID_FRONT
+                && document.hasCurrentSecurityChecks()).findFirst().orElseThrow();
+        var back = readyDocuments.stream().filter(document -> document.getDocumentType() == VerificationDocumentType.ID_BACK
+                && document.hasCurrentSecurityChecks()).findFirst().orElseThrow();
+        imageValidator.assertMatchingStoredIdNames(storageClient, front.getObjectPath(), front.getSizeBytes(),
+                back.getObjectPath(), back.getSizeBytes());
+
         verification.markPending();
 
         return toResponse(

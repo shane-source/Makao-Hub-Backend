@@ -17,6 +17,7 @@ import com.makaohub.backend.auth.exception.AuthException;
 import com.makaohub.backend.verification.domain.RoleVerification;
 import com.makaohub.backend.verification.domain.VerificationStatus;
 import com.makaohub.backend.verification.repository.RoleVerificationRepository;
+import com.makaohub.backend.payment.service.LandlordOfferService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +35,7 @@ public class SublessorListingService {
     private final SublessorListingLocationRepository locationRepository;
     private final SublessorListingMediaRepository mediaRepository;
     private final RoleVerificationRepository verificationRepository;
+    private final LandlordOfferService offers;
 
     public SublessorListingService(
             UserRepository userRepository,
@@ -41,7 +43,8 @@ public class SublessorListingService {
             SublessorListingRepository listingRepository,
             SublessorListingLocationRepository locationRepository,
             SublessorListingMediaRepository mediaRepository,
-            RoleVerificationRepository verificationRepository
+            RoleVerificationRepository verificationRepository,
+            LandlordOfferService offers
     ) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
@@ -49,6 +52,7 @@ public class SublessorListingService {
         this.locationRepository = locationRepository;
         this.mediaRepository = mediaRepository;
         this.verificationRepository = verificationRepository;
+        this.offers = offers;
     }
 
     @Transactional
@@ -139,6 +143,7 @@ public class SublessorListingService {
         requireVerifiedSublessor(authenticatedUserId);
         requireLocation(listingId);
         requireConfirmedMedia(listingId);
+        offers.requireSublessorPublicationSlot(authenticatedUserId);
 
         listing.publish();
 
@@ -181,6 +186,7 @@ public class SublessorListingService {
                 );
 
         requireVerifiedSublessor(authenticatedUserId);
+        offers.requireSublessorPublicationSlot(authenticatedUserId);
 
         listing.resume();
 

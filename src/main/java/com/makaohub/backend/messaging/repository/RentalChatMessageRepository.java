@@ -14,6 +14,11 @@ import java.util.UUID;
 public interface RentalChatMessageRepository
         extends JpaRepository<RentalChatMessage, UUID> {
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT m FROM RentalChatMessage m WHERE m.id = :id AND m.chatThreadId = :thread AND m.senderId <> :recipient")
+    Optional<RentalChatMessage> lockIncoming(@Param("id") UUID id, @Param("thread") UUID thread,
+                                            @Param("recipient") UUID recipient);
+
     /**
      * Finds a previously saved message when the client retries.
      *

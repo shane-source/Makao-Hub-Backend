@@ -14,6 +14,7 @@ import com.makaohub.backend.payment.service.PaymentIntentService;
 import com.makaohub.backend.payment.ledger.service.MockEscrowLedgerService;
 import com.makaohub.backend.renter.domain.Booking;
 import com.makaohub.backend.renter.domain.BookingListingKind;
+import com.makaohub.backend.renter.domain.BookingStatus;
 import com.makaohub.backend.renter.repository.BookingRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,8 +27,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -59,7 +62,7 @@ class BookingPaymentServiceTest {
         when(user.getAccountStatus()).thenReturn(AccountStatus.ACTIVE);
         when(userRoleRepository.existsByUser_IdAndRole_Name(any(), any()))
                 .thenReturn(true);
-        when(bookingRepository.findByIdAndRenterId(bookingId, renterId))
+        when(bookingRepository.findByIdAndRenterIdForUpdate(bookingId, renterId))
                 .thenReturn(Optional.of(booking));
         when(paymentIntentRepository.findByPayerUserIdAndIdempotencyKey(
                 renterId, "booking-1"
@@ -81,6 +84,66 @@ class BookingPaymentServiceTest {
         verify(paymentIntentService).create(captor.capture());
         assertEquals(bookingId, captor.getValue().bookingId());
         assertEquals(120_000, captor.getValue().amountMinor());
+    }
+
+    @Test
+    void failedBookingAttemptCanBeRetriedWithNewKey() {
+        UUID renterId = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        Booking booking = new Booking(renterId, UUID.randomUUID(), UUID.randomUUID(),
+                BookingListingKind.LANDLORD_LISTING, UUID.randomUUID(),
+                4_000_000, 4_000_000, 400_000, Booking.KES);
+        setId(booking, bookingId);
+        PaymentIntent failed = org.mockito.Mockito.mock(PaymentIntent.class);
+        when(failed.getStatus()).thenReturn(PaymentStatus.FAILED);
+        User user = org.mockito.Mockito.mock(User.class);
+        when(userRepository.findById(renterId)).thenReturn(Optional.of(user));
+        when(user.getAccountStatus()).thenReturn(AccountStatus.ACTIVE);
+        when(userRoleRepository.existsByUser_IdAndRole_Name(any(), any())).thenReturn(true);
+        when(bookingRepository.findByIdAndRenterIdForUpdate(bookingId, renterId))
+                .thenReturn(Optional.of(booking));
+        when(paymentIntentRepository.findByPayerUserIdAndIdempotencyKey(renterId, "booking-retry"))
+                .thenReturn(Optional.empty());
+        when(paymentIntentRepository.findAllByPayerUserIdAndBookingId(renterId, bookingId))
+                .thenReturn(java.util.List.of(failed));
+        when(paymentIntentService.create(any())).thenReturn(org.mockito.Mockito.mock(PaymentIntent.class));
+
+        service().createPaymentIntent(renterId, bookingId, "booking-retry");
+
+        ArgumentCaptor<PaymentIntentService.CreatePaymentCommand> command =
+                ArgumentCaptor.forClass(PaymentIntentService.CreatePaymentCommand.class);
+        verify(paymentIntentService).create(command.capture());
+        assertEquals(8_400_000, command.getValue().amountMinor());
+        assertEquals(com.makaohub.backend.renter.domain.BookingStatus.PAYMENT_PENDING,
+                booking.getStatus());
+    }
+
+    @Test
+    void pendingBookingAttemptCannotStartASecondCharge() {
+        UUID renterId = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        Booking booking = new Booking(renterId, UUID.randomUUID(), UUID.randomUUID(),
+                BookingListingKind.LANDLORD_LISTING, UUID.randomUUID(),
+                4_000_000, 4_000_000, 400_000, Booking.KES);
+        setId(booking, bookingId);
+        PaymentIntent pending = org.mockito.Mockito.mock(PaymentIntent.class);
+        when(pending.getStatus()).thenReturn(PaymentStatus.PENDING);
+        User user = org.mockito.Mockito.mock(User.class);
+        when(userRepository.findById(renterId)).thenReturn(Optional.of(user));
+        when(user.getAccountStatus()).thenReturn(AccountStatus.ACTIVE);
+        when(userRoleRepository.existsByUser_IdAndRole_Name(any(), any())).thenReturn(true);
+        when(bookingRepository.findByIdAndRenterIdForUpdate(bookingId, renterId))
+                .thenReturn(Optional.of(booking));
+        when(paymentIntentRepository.findByPayerUserIdAndIdempotencyKey(renterId, "second-charge"))
+                .thenReturn(Optional.empty());
+        when(paymentIntentRepository.findAllByPayerUserIdAndBookingId(renterId, bookingId))
+                .thenReturn(java.util.List.of(pending));
+
+        assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> service().createPaymentIntent(renterId, bookingId, "second-charge"));
+
+        verifyNoInteractions(paymentIntentService);
+        assertEquals(BookingStatus.AWAITING_PAYMENT, booking.getStatus());
     }
 
     @Test

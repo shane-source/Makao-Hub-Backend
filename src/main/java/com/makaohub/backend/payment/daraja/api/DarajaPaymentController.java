@@ -118,6 +118,9 @@ public class DarajaPaymentController {
             PaymentType paymentType,
             UUID listingId
     ) {
+        if (paymentType == PaymentType.PLAN_UPGRADE || paymentType == PaymentType.BOOST) {
+            throw badRequest("Use the landlord offers checkout for plans and boosts.");
+        }
         if (paymentType == PaymentType.BOOKING) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,

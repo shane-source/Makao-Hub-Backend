@@ -14,6 +14,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -63,6 +64,18 @@ public class PaymentQueryController {
             );
         }
         return new UnlockPrice(type, pricingService.amountMinor(type), PaymentIntent.KES);
+    }
+
+    /** Finds only this renter's existing booking payment; checking never creates another charge. */
+    @GetMapping("/bookings/{bookingId}")
+    public PaymentIntentResponse bookingPayment(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID bookingId) {
+        UUID renterId = authenticatedUserId(jwt);
+        if (activeRole(jwt) != RoleName.RENTER) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only renters can check their booking payments.");
+        }
+        return PaymentIntentResponse.from(paymentIntentRepository
+                .findFirstByPayerUserIdAndBookingIdAndPaymentTypeOrderByCreatedAtDesc(renterId, bookingId, PaymentType.BOOKING)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Booking payment unavailable.")));
     }
 
     @PostMapping("/status")

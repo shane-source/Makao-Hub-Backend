@@ -26,7 +26,7 @@ public class ChatContactMaskingService {
                     + "@"
                     + "[a-z0-9.-]+"
                     + "\\.[a-z]{2,}"
-                    + "(?![a-z0-9.-])"
+                    + "(?![a-z0-9-])"
     );
 
     /*
@@ -46,12 +46,13 @@ public class ChatContactMaskingService {
      * This keeps the expression narrow and reduces false positives.
      */
     private static final Pattern KENYAN_PHONE = Pattern.compile(
-            "(?<!\\d)"
-                    + "(?:(?:\\+?254|0)[ -]?)?"
-                    + "[17]\\d{2}"
-                    + "(?:[ -]?\\d{3}){2}"
-                    + "(?!\\d)"
+            "(?<![a-zA-Z0-9])"
+                    + "(?:(?:\\+?[ -]*2[ -]*5[ -]*4|0)[ -]*)?"
+                    + "[17](?:[ -]*\\d){8}"
+                    + "(?![ -]*\\d)"
     );
+
+    private static final Pattern NUMERIC_GROUP = Pattern.compile("\\d+");
 
     /*
      * Detects HTTP, HTTPS and www links.
@@ -80,6 +81,11 @@ public class ChatContactMaskingService {
     public MaskedMessage mask(
             String originalContent
     ) {
+        return maskChat(originalContent, false);
+    }
+
+    /** Applies the conversation limit only in chats, without exposing raw digits. */
+    public MaskedMessage maskChat(String originalContent, boolean overNumericGroupLimit) {
         String masked = originalContent;
 
         EnumSet<ContactFlag> flags =
@@ -113,6 +119,11 @@ public class ChatContactMaskingService {
                 flags
         );
 
+        if (overNumericGroupLimit) {
+            masked = NUMERIC_GROUP.matcher(masked).replaceAll(MASK);
+            flags.add(ContactFlag.NUMERIC_GROUP_LIMIT);
+        }
+
         String flagCodes = flags.isEmpty()
                 ? null
                 : flags.stream()
@@ -127,6 +138,16 @@ public class ChatContactMaskingService {
                 !flags.isEmpty(),
                 flagCodes
         );
+    }
+
+    /** Counts contiguous digit runs, capped so only the threshold matters. */
+    public int countNumericGroups(String content) {
+        var matcher = NUMERIC_GROUP.matcher(content);
+        int count = 0;
+        while (count < 6 && matcher.find()) {
+            count++;
+        }
+        return count;
     }
 
     /**
@@ -160,7 +181,8 @@ public class ChatContactMaskingService {
         EMAIL,
         PHONE,
         WEB_LINK,
-        SOCIAL_HANDLE
+        SOCIAL_HANDLE,
+        NUMERIC_GROUP_LIMIT
     }
 
     /**

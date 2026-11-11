@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class PaymentQueryControllerTest {
@@ -85,6 +86,38 @@ class PaymentQueryControllerTest {
 
         assertEquals(0, response.totalElements());
         verify(repository).findAllByPayerUserId(any(), any());
+    }
+
+    @Test
+    void bookingPaymentLookupUsesAuthenticatedPayerAndBookingType() {
+        UUID renterId = UUID.randomUUID(), bookingId = UUID.randomUUID(), intentId = UUID.randomUUID();
+        PaymentIntent intent = org.mockito.Mockito.mock(PaymentIntent.class);
+        when(intent.getId()).thenReturn(intentId);
+        when(repository.findFirstByPayerUserIdAndBookingIdAndPaymentTypeOrderByCreatedAtDesc(
+                renterId, bookingId, PaymentType.BOOKING)).thenReturn(Optional.of(intent));
+        assertEquals(intentId, controller().bookingPayment(jwt(renterId, "RENTER"), bookingId).id());
+        verify(repository).findFirstByPayerUserIdAndBookingIdAndPaymentTypeOrderByCreatedAtDesc(
+                renterId, bookingId, PaymentType.BOOKING);
+    }
+
+    @Test
+    void anotherRentersBookingPaymentIsNotReturned() {
+        UUID renterId = UUID.randomUUID(), bookingId = UUID.randomUUID();
+        when(repository.findFirstByPayerUserIdAndBookingIdAndPaymentTypeOrderByCreatedAtDesc(
+                renterId, bookingId, PaymentType.BOOKING)).thenReturn(Optional.empty());
+        var failure = assertThrows(ResponseStatusException.class,
+                () -> controller().bookingPayment(jwt(renterId, "RENTER"), bookingId));
+        assertEquals(404, failure.getStatusCode().value());
+    }
+
+    @Test
+    void onlyRenterRoleCanLookupExistingBookingPayment() {
+        for (String role : List.of("LANDLORD", "SUBLESSOR", "ADMIN")) {
+            var failure = assertThrows(ResponseStatusException.class,
+                    () -> controller().bookingPayment(jwt(UUID.randomUUID(), role), UUID.randomUUID()));
+            assertEquals(403, failure.getStatusCode().value());
+        }
+        verifyNoInteractions(repository);
     }
 
     @Test

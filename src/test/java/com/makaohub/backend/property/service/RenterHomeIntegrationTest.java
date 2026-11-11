@@ -80,4 +80,17 @@ class RenterHomeIntegrationTest {
             assertTrue(homes.search(other,0,20,null,null,null,null,null,null,null,null,true).items().isEmpty());
         } finally { jdbc.update("DELETE FROM saved_listings WHERE user_id=?",other); }
     }
+    @Test void deactivatedOwnersDisappearFromSearchAndDirectViewsUntilReactivated() {
+        try {
+            jdbc.update("UPDATE users SET account_status='DEACTIVATED' WHERE id IN (?,?)", owner, host);
+            assertTrue(homes.search(renter,0,20,null,null,null,null,null,null,null,null,false).items().isEmpty());
+            assertThrows(ResponseStatusException.class, () -> homes.one(renter,"LANDLORD",whole));
+            assertThrows(ResponseStatusException.class, () -> homes.one(renter,"SUBLESSOR",room));
+            assertThrows(ResponseStatusException.class, () -> homes.access(renter,whole));
+            assertThrows(ResponseStatusException.class, () -> homes.access(renter,room));
+        } finally {
+            jdbc.update("UPDATE users SET account_status='ACTIVE' WHERE id IN (?,?)", owner, host);
+        }
+        assertEquals(2, homes.search(renter,0,20,null,null,null,null,null,null,null,null,false).items().size());
+    }
 }

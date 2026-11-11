@@ -153,6 +153,21 @@ class SublessorEvidencePolicyTest {
         verifyNoInteractions(storage, pdf, image);
     }
 
+    @Test void mismatchedIdNamesCannotEnterReview() {
+        var front = document(VerificationDocumentType.ID_FRONT, "image/jpeg");
+        var back = document(VerificationDocumentType.ID_BACK, "image/jpeg");
+        var selfie = document(VerificationDocumentType.SELFIE, "image/jpeg");
+        var agreement = document(VerificationDocumentType.RENTAL_AGREEMENT, "application/pdf");
+        front.markReady(100); back.markReady(100); selfie.markReady(100); agreement.markReady(100);
+        when(documents.findAllBySublessorIdAndStatus(actor, VerificationDocumentStatus.READY))
+                .thenReturn(List.of(front, back, selfie, agreement));
+        doThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST)).when(image).assertMatchingStoredIdNames(
+                eq(storage), anyString(), anyLong(), anyString(), anyLong());
+        assertEquals(400, assertThrows(ResponseStatusException.class,
+                () -> service.submitMyVerification(actor)).getStatusCode().value());
+        verify(verification, never()).save(any());
+    }
+
     private SublessorVerificationDocument document(VerificationDocumentType type, String mime) {
         return new SublessorVerificationDocument(actor, type, actor + "/sublessor-evidence-v1/synthetic.pdf", mime);
     }

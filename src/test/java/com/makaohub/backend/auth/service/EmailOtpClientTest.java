@@ -65,7 +65,7 @@ class EmailOtpClientTest {
             client.sendCode("tester@example.invalid", "012345", purpose);
         }
         var capture = ArgumentCaptor.forClass(SimpleMailMessage.class);
-        verify(mailer, times(3)).send(capture.capture());
+        verify(mailer, times(AuthOtpChallengePurpose.values().length)).send(capture.capture());
         for (var message : capture.getAllValues()) {
             assertEquals(properties().fromEmail(), message.getFrom());
             assertArrayEquals(new String[]{"tester@example.invalid"}, message.getTo());
@@ -111,6 +111,7 @@ class EmailOtpClientTest {
         private AuthenticationTokenService tokens;
         private PasswordEncoder passwords;
         private AuthOtpService service;
+        private GoogleIdentityRepository identities;
         private User user;
         private final Instant issued = Instant.parse("2026-10-13T12:00:00Z");
         private final AtomicReference<Instant> now = new AtomicReference<>(issued);
@@ -129,7 +130,8 @@ class EmailOtpClientTest {
             doAnswer(call -> { code = call.getArgument(1); return null; })
                     .when(sender).sendCode(anyString(), anyString(), any());
             Clock clock = mock(Clock.class); when(clock.instant()).thenAnswer(call -> now.get());
-            service = new AuthOtpService(challenges, users, refresh, properties(), sender, tokens, passwords, clock);
+            identities = mock(GoogleIdentityRepository.class);
+            service = new AuthOtpService(challenges, users, refresh, properties(), sender, tokens, passwords, clock, identities);
         }
 
         private AuthOtpChallenge issue(AuthOtpChallengePurpose purpose) {
@@ -144,6 +146,76 @@ class EmailOtpClientTest {
             when(challenges.findFirstByUser_IdAndPurposeAndStatusOrderByIssuedAtDesc(user.getId(), purpose, AuthOtpChallengeStatus.PENDING))
                     .thenReturn(Optional.of(challenge));
             return challenge;
+        }
+
+        private AuthOtpChallenge googleChallenge() {
+            service.startGoogleLogin(user, "google-subject");
+            var challenge = saved.get();
+            when(challenges.findUserIdByChallengeId(challenge.getId())).thenReturn(Optional.of(user.getId()));
+            when(challenges.findByIdForUpdate(challenge.getId())).thenReturn(Optional.of(challenge));
+            return challenge;
+        }
+
+        @Test void googleLinkRequiresInboxCodeAndCannotBeReplayed() {
+            var challenge = googleChallenge();
+            assertEquals("google-subject", challenge.getPendingGoogleSubject());
+            verify(identities, never()).saveAndFlush(any());
+            verifyNoInteractions(tokens);
+            String wrong = code.equals("000000") ? "000001" : "000000";
+            assertThrows(AuthException.class, () -> service.verifyLogin(challenge.getId(), wrong));
+            verify(identities, never()).saveAndFlush(any());
+            service.verifyLogin(challenge.getId(), code);
+            verify(identities).saveAndFlush(argThat(link -> link.getUser() == user
+                    && link.getGoogleSubject().equals("google-subject")));
+            verify(tokens).issue(user);
+            assertEquals("old-password-hash", user.getPasswordHash());
+            assertThrows(AuthException.class, () -> service.verifyLogin(challenge.getId(), code));
+            verify(tokens, times(1)).issue(user);
+        }
+
+        @Test void missingOrOversizedGoogleSubjectCannotFallBackToPasswordOtp() {
+            for (String subject : Arrays.asList(null, "", " ", "a".repeat(256))) {
+                assertThrows(AuthException.class, () -> service.startGoogleLogin(user, subject));
+            }
+            verifyNoInteractions(sender, challenges, identities, tokens);
+        }
+
+        @Test void googleLinkCannotReplaceAnotherSubjectOrTakeAnotherAccount() {
+            when(identities.findById(user.getId())).thenReturn(Optional.of(new GoogleIdentity(user, "other-subject")));
+            assertThrows(AuthException.class, () -> service.startGoogleLogin(user, "google-subject"));
+            verifyNoInteractions(sender, tokens);
+            when(identities.findById(user.getId())).thenReturn(Optional.empty());
+            User other = mock(User.class);
+            when(other.getId()).thenReturn(UUID.randomUUID());
+            when(identities.findByGoogleSubject("google-subject"))
+                    .thenReturn(Optional.of(new GoogleIdentity(other, "google-subject")));
+            assertThrows(AuthException.class, () -> service.startGoogleLogin(user, "google-subject"));
+            verify(identities, never()).saveAndFlush(any());
+        }
+
+        @Test void googleLinkIsRecheckedAtConsumptionAndSubjectIsBoundToDigest() {
+            var challenge = googleChallenge();
+            when(identities.findById(user.getId())).thenReturn(Optional.of(new GoogleIdentity(user, "other-subject")));
+            assertThrows(AuthException.class, () -> service.verifyLogin(challenge.getId(), code));
+            verifyNoInteractions(tokens);
+            when(identities.findById(user.getId())).thenReturn(Optional.empty());
+            ReflectionTestUtils.setField(challenge, "pendingGoogleSubject", "tampered-subject");
+            assertThrows(AuthException.class, () -> service.verifyLogin(challenge.getId(), code));
+            verify(identities, never()).saveAndFlush(any());
+        }
+
+        @Test void expiredGoogleChallengeAndAlreadyLinkedSubjectAreHandledSafely() {
+            var expired = googleChallenge();
+            now.set(issued.plusSeconds(300));
+            assertThrows(AuthException.class, () -> service.verifyLogin(expired.getId(), code));
+            verify(identities, never()).saveAndFlush(any());
+            now.set(issued);
+            when(identities.findById(user.getId())).thenReturn(Optional.of(new GoogleIdentity(user, "google-subject")));
+            when(identities.existsById(user.getId())).thenReturn(true);
+            var existing = googleChallenge();
+            service.verifyLogin(existing.getId(), code);
+            verify(identities, never()).saveAndFlush(any());
+            verify(tokens).issue(user);
         }
 
         @Test void onlyDigestIsStoredAndOnlySuccessfulVerificationIssuesTokens() {
@@ -170,6 +242,23 @@ class EmailOtpClientTest {
             assertEquals(5, challenge.getAttemptCount()); assertEquals(AuthOtpChallengeStatus.LOCKED, challenge.getStatus());
             assertThrows(AuthException.class, () -> service.verifyLogin(challenge.getId(), code));
             verifyNoInteractions(tokens);
+        }
+
+        @Test void deactivatedAccountRequiresSeparateReactivationAndCodeCannotReplay() {
+            user.changeSelfServiceStatus(AccountStatus.DEACTIVATED);
+            var response = service.startLogin(user);
+            assertEquals(AuthOtpChallengePurpose.REACTIVATION, response.purpose());
+            var challenge = saved.get();
+            when(challenges.findUserIdByChallengeId(challenge.getId())).thenReturn(Optional.of(user.getId()));
+            when(challenges.findByIdForUpdate(challenge.getId())).thenReturn(Optional.of(challenge));
+            assertThrows(AuthException.class, () -> service.verifyLogin(challenge.getId(), code));
+            assertEquals(AccountStatus.DEACTIVATED, user.getAccountStatus());
+            verifyNoInteractions(tokens);
+            service.verifyReactivation(challenge.getId(), code);
+            assertEquals(AccountStatus.ACTIVE, user.getAccountStatus());
+            verify(tokens).issue(user);
+            assertThrows(AuthException.class, () -> service.verifyReactivation(challenge.getId(), code));
+            verify(tokens, times(1)).issue(user);
         }
 
         @Test void expiryAndPurposeCannotBeBypassed() {

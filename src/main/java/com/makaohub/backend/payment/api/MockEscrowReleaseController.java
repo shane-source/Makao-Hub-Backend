@@ -1,8 +1,15 @@
 package com.makaohub.backend.payment.api;
 
+import com.makaohub.backend.auth.domain.RoleName;
+import com.makaohub.backend.admin.StaffAccessService;
+import com.makaohub.backend.admin.StaffRole;
+import com.makaohub.backend.payment.paystack.config.PaystackProperties;
 import com.makaohub.backend.renter.api.BookingResponse;
 import com.makaohub.backend.renter.service.BookingAgreementService;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -11,12 +18,10 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.http.HttpStatus;
 
-import java.util.UUID;
-import java.util.List;
 import java.time.Instant;
-import com.makaohub.backend.auth.domain.RoleName;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * Test-only admin release; it records a payout simulation and moves no money.
@@ -29,9 +34,20 @@ import com.makaohub.backend.auth.domain.RoleName;
 public class MockEscrowReleaseController {
 
     private final BookingAgreementService agreementService;
+    private final Environment environment;
+    private final PaystackProperties paystackProperties;
+    private final StaffAccessService staffAccess;
 
-    public MockEscrowReleaseController(BookingAgreementService agreementService) {
+    public MockEscrowReleaseController(
+            BookingAgreementService agreementService,
+            Environment environment,
+            PaystackProperties paystackProperties,
+            StaffAccessService staffAccess
+    ) {
         this.agreementService = agreementService;
+        this.environment = environment;
+        this.paystackProperties = paystackProperties;
+        this.staffAccess = staffAccess;
     }
 
     @PostMapping("/{bookingId}/release")
@@ -41,6 +57,8 @@ public class MockEscrowReleaseController {
             @RequestHeader("Idempotency-Key") String idempotencyKey
     ) {
         requireActiveAdminRole(jwt);
+        staffAccess.require(jwt, StaffRole.Permission.TEST_RELEASE);
+        requireTestOnlySimulation();
         return BookingResponse.from(
                 agreementService.releaseMock(
                         userId(jwt),
@@ -49,6 +67,22 @@ public class MockEscrowReleaseController {
                         Instant.now()
                 )
         );
+    }
+
+    private void requireTestOnlySimulation() {
+        if (environment.acceptsProfiles(Profiles.of("paystack"))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Paystack TEST bookings use automatic verified transfers; manual simulated release is disabled.");
+        }
+        if (environment.acceptsProfiles(Profiles.of("paystack"))
+                && (!paystackProperties.enabled()
+                || paystackProperties.secretKey() == null
+                || !paystackProperties.secretKey().startsWith("sk_test_"))) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Simulated release is available only with an enabled Paystack test key."
+            );
+        }
     }
 
     private static void requireActiveAdminRole(Jwt jwt) {

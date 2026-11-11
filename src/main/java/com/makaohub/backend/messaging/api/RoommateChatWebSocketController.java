@@ -40,6 +40,12 @@ public class RoommateChatWebSocketController {
         messagePublisher.publish(sent);
     }
 
+    @MessageMapping("/chat.delivered")
+    public void acknowledge(Authentication authentication, @Valid AcknowledgeChatMessagesRequest request) {
+        // Service transaction commits before any private receipt is published.
+        messageService.acknowledge(extractUserId(authentication), request).forEach(messagePublisher::publish);
+    }
+
     private static UUID extractUserId(
             Authentication authentication
     ) {

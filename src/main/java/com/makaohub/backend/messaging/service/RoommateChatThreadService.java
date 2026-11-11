@@ -43,19 +43,22 @@ public class RoommateChatThreadService {
     private final RoommateInterestRepository interestRepository;
     private final SublessorListingRepository listingRepository;
     private final RoommateChatThreadRepository threadRepository;
+    private final ChatInboxMetadataService inboxMetadata;
 
     public RoommateChatThreadService(
             UserRepository userRepository,
             UserRoleRepository userRoleRepository,
             RoommateInterestRepository interestRepository,
             SublessorListingRepository listingRepository,
-            RoommateChatThreadRepository threadRepository
+            RoommateChatThreadRepository threadRepository,
+            ChatInboxMetadataService inboxMetadata
     ) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
         this.interestRepository = interestRepository;
         this.listingRepository = listingRepository;
         this.threadRepository = threadRepository;
+        this.inboxMetadata = inboxMetadata;
     }
 
     /**
@@ -144,12 +147,13 @@ public class RoommateChatThreadService {
 
         Pageable boundedPage = boundPageable(requestedPage);
 
-        return threadRepository
+        var page = threadRepository
                 .findAllByRenterIdOrderByCreatedAtDesc(
                         renterId,
                         boundedPage
-                )
-                .map(this::toResponse);
+                );
+        var metadata = inboxMetadata.forThreads(renterId, ChatInboxMetadataService.Kind.ROOMMATE, page.getContent().stream().map(RoommateChatThread::getId).toList());
+        return page.map(thread -> toResponse(thread, metadata.get(thread.getId())));
     }
 
     /**
@@ -171,7 +175,7 @@ public class RoommateChatThreadService {
                         RoommateChatThreadService::threadNotFound
                 );
 
-        return toResponse(thread);
+        return toResponse(thread, inboxMetadata.forThreads(renterId, ChatInboxMetadataService.Kind.ROOMMATE, List.of(thread.getId())).get(thread.getId()));
     }
 
     /**
@@ -202,12 +206,13 @@ public class RoommateChatThreadService {
 
         Pageable boundedPage = boundPageable(requestedPage);
 
-        return threadRepository
+        var page = threadRepository
                 .findAllBySublessorIdOrderByCreatedAtDesc(
                         sublessorId,
                         boundedPage
-                )
-                .map(this::toResponse);
+                );
+        var metadata = inboxMetadata.forThreads(sublessorId, ChatInboxMetadataService.Kind.ROOMMATE, page.getContent().stream().map(RoommateChatThread::getId).toList());
+        return page.map(thread -> toResponse(thread, metadata.get(thread.getId())));
     }
 
     /**
@@ -229,7 +234,7 @@ public class RoommateChatThreadService {
                         RoommateChatThreadService::threadNotFound
                 );
 
-        return toResponse(thread);
+        return toResponse(thread, inboxMetadata.forThreads(sublessorId, ChatInboxMetadataService.Kind.ROOMMATE, List.of(thread.getId())).get(thread.getId()));
     }
 
     /**
@@ -273,7 +278,7 @@ public class RoommateChatThreadService {
      * not exposed through this response.
      */
     private RoommateChatThreadResponse toResponse(
-            RoommateChatThread thread
+            RoommateChatThread thread, ChatInboxMetadataService.Summary summary
     ) {
         return new RoommateChatThreadResponse(
                 thread.getId(),
@@ -283,7 +288,9 @@ public class RoommateChatThreadService {
                         == RoommateChatThreadStatus.OPEN,
                 thread.getCreatedAt(),
                 thread.getUpdatedAt(),
-                thread.getClosedAt()
+                thread.getClosedAt(),
+                summary == null ? null : summary.name(), summary == null ? null : summary.avatarUrl(),
+                summary == null ? null : summary.lastMessage(), summary == null ? null : summary.lastMessageAt()
         );
     }
 

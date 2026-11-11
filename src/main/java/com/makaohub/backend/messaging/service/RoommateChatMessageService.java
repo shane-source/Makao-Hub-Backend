@@ -9,11 +9,14 @@ import com.makaohub.backend.auth.repository.UserRoleRepository;
 import com.makaohub.backend.messaging.api.RoommateChatMessagePageResponse;
 import com.makaohub.backend.messaging.api.RoommateChatMessageResponse;
 import com.makaohub.backend.messaging.api.SendRoommateChatMessageRequest;
+import com.makaohub.backend.messaging.api.AcknowledgeChatMessagesRequest;
 import com.makaohub.backend.messaging.domain.RoommateChatMessage;
 import com.makaohub.backend.messaging.domain.RoommateChatThread;
 import com.makaohub.backend.messaging.domain.RoommateChatThreadStatus;
 import com.makaohub.backend.messaging.repository.RoommateChatMessageRepository;
 import com.makaohub.backend.messaging.repository.RoommateChatThreadRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
 import org.springframework.http.HttpStatus;
@@ -41,25 +44,31 @@ public class RoommateChatMessageService {
             "CONTACT_DETAILS";
 
     private final UserRepository userRepository;
+    private final EntityManager entityManager;
     private final UserRoleRepository userRoleRepository;
     private final RoommateChatThreadRepository threadRepository;
     private final RoommateChatMessageRepository messageRepository;
     private final ChatContactMaskingService maskingService;
+    private final ChatNumericGroupCounter numericGroupCounter;
     private final ChatMessageRateLimiter rateLimiter;
 
     public RoommateChatMessageService(
+            EntityManager entityManager,
             UserRepository userRepository,
             UserRoleRepository userRoleRepository,
             RoommateChatThreadRepository threadRepository,
             RoommateChatMessageRepository messageRepository,
             ChatContactMaskingService maskingService,
+            ChatNumericGroupCounter numericGroupCounter,
             ChatMessageRateLimiter rateLimiter
     ) {
+        this.entityManager = entityManager;
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
         this.threadRepository = threadRepository;
         this.messageRepository = messageRepository;
         this.maskingService = maskingService;
+        this.numericGroupCounter = numericGroupCounter;
         this.rateLimiter = rateLimiter;
     }
 
@@ -74,7 +83,7 @@ public class RoommateChatMessageService {
             UUID authenticatedUserId,
             SendRoommateChatMessageRequest request
     ) {
-        requireActiveUser(authenticatedUserId);
+        requireActiveSenderWithLock(authenticatedUserId);
 
         RoommateChatThread thread = requireAccessibleThread(
                 authenticatedUserId,
@@ -207,10 +216,17 @@ public class RoommateChatMessageService {
             RoommateChatThread thread,
             SendRoommateChatMessageRequest request
     ) {
+        String originalContent = request.content().strip();
+        boolean overLimit = numericGroupCounter.exceedsLimit(
+                false, thread.getId(), senderId,
+                maskingService.countNumericGroups(originalContent));
         ChatContactMaskingService.MaskedMessage masked =
-                maskingService.mask(
-                        request.content().strip()
-                );
+                maskingService.maskChat(originalContent, overLimit);
+
+        if (masked.content().isBlank() || masked.content().length() > 2000) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Message is empty or too long after contact masking.");
+        }
 
         RoommateChatMessage message;
 
@@ -324,6 +340,20 @@ public class RoommateChatMessageService {
         }
     }
 
+    /** Serializes sends by one account, including retries of a client message ID. */
+    private void requireActiveSenderWithLock(UUID userId) {
+        if (userId == null) {
+            throw accountUnavailable();
+        }
+        User user = entityManager.find(User.class, userId, LockModeType.PESSIMISTIC_WRITE);
+        if (user == null) {
+            throw accountUnavailable();
+        }
+        if (user.getAccountStatus() != AccountStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Account is not active.");
+        }
+    }
+
     /**
      * Protects the server from excessively large history requests.
      */
@@ -415,7 +445,8 @@ public class RoommateChatMessageService {
                 message.getClientMessageId(),
                 message.getMaskedBody(),
                 message.isFlagged(),
-                message.getCreatedAt()
+                message.getCreatedAt(),
+                message.getDeliveredAt()
         );
     }
 
@@ -438,6 +469,25 @@ public class RoommateChatMessageService {
                 AuthException.Reason.ACCOUNT_UNAVAILABLE,
                 "The account is unavailable."
         );
+    }
+
+    @Transactional
+    public List<SentMessage> acknowledge(UUID recipient, AcknowledgeChatMessagesRequest request) {
+        if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid delivery acknowledgement.");
+        var ids = request.validatedIds();
+        if (recipient == null) throw accountUnavailable();
+        rateLimiter.requireDeliveryPermission(recipient);
+        requireActiveUser(recipient);
+        var thread = requireAccessibleThread(recipient, request.threadId());
+        requireOpenThread(thread);
+        Instant now = Instant.now();
+        // Same bounded, ordered locks as rental delivery; no client timestamps or sender-controlled receipts.
+        return ids.stream().map(id -> {
+            var message = messageRepository.lockIncoming(id, thread.getId(), recipient)
+                    .orElseThrow(RoommateChatMessageService::threadNotFound);
+            message.confirmDelivery(now);
+            return new SentMessage(toResponse(message), thread.getRenterId(), thread.getSublessorId());
+        }).toList();
     }
 
     private record MessageCursor(

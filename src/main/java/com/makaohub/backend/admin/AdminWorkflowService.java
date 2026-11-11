@@ -233,7 +233,30 @@ public class AdminWorkflowService {
 
     public AdminStore.Page bookings(Jwt jwt,int page,int size) {
         var staff=access.require(jwt,PAYMENTS_VIEW);
-        var result=db.page("SELECT id,listing_id,listing_kind,rent_amount_minor,deposit_amount_minor,commission_amount_minor,total_amount_minor,currency,status,move_in_confirmed_at,release_eligible_at,released_at FROM bookings ORDER BY created_at DESC,id",page,size);
+        var result=db.page("""
+                SELECT b.id,b.owner_id,b.listing_id,b.listing_kind,b.rent_amount_minor,b.deposit_amount_minor,
+                       b.commission_amount_minor,b.total_amount_minor,b.currency,b.status,
+                       b.move_in_confirmed_at,b.owner_move_in_confirmed_at,b.release_eligible_at,b.owner_release_requested_at,b.released_at,
+                       owner.full_name AS owner_name,renter.full_name AS renter_name,
+                       b.move_in_accepted,b.move_in_answered_at,b.test_payout_status,
+                       EXISTS(SELECT 1 FROM paystack_test_destinations d WHERE d.owner_id=b.owner_id) AS test_destination_configured,
+                       (b.status='PAID_HELD' AND b.move_in_accepted IS TRUE AND b.renter_agreed_at IS NOT NULL AND b.owner_agreed_at IS NOT NULL
+                        AND b.move_in_confirmed_at IS NOT NULL AND b.owner_move_in_confirmed_at IS NOT NULL
+                        AND b.release_eligible_at <= CURRENT_TIMESTAMP
+                        AND EXISTS (SELECT 1 FROM payment_intents p WHERE p.booking_id=b.id
+                            AND p.payment_type='BOOKING' AND p.status='SUCCEEDED')
+                        AND NOT EXISTS (SELECT 1 FROM payment_intents p WHERE p.booking_id=b.id
+                            AND p.payment_type='BOOKING' AND p.status='DISPUTED')
+                        AND EXISTS (SELECT 1 FROM role_verifications v WHERE v.user_id=b.owner_id
+                            AND v.role=CASE WHEN b.listing_kind='LANDLORD_LISTING' THEN 'LANDLORD' ELSE 'SUBLESSOR' END
+                            AND v.status='VERIFIED')) AS release_ready
+                FROM bookings b JOIN users owner ON owner.id=b.owner_id
+                JOIN users renter ON renter.id=b.renter_id
+                ORDER BY (b.move_in_accepted IS FALSE) DESC NULLS LAST,
+                         (b.status='PAID_HELD' AND b.owner_release_requested_at IS NOT NULL) DESC,
+                         (b.status='PAID_HELD' AND b.release_eligible_at <= CURRENT_TIMESTAMP) DESC,
+                         b.created_at DESC,b.id
+                """,page,size);
         db.audit(staff.userId(),"BOOKING_RECORDS_VIEWED",null,"Read-only held-payment and release history",null,"VIEWED"); return result;
     }
 

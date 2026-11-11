@@ -16,6 +16,7 @@ public record RentalChatMessageResponse(
         UUID clientMessageId,
         String content,
         boolean contactMasked,
-        Instant createdAt
+        Instant createdAt,
+        Instant deliveredAt
 ) {
 }

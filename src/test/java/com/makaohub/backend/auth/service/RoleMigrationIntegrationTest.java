@@ -108,7 +108,7 @@ class RoleMigrationIntegrationTest {
         var passwordLogin = new PasswordAuthenticationService(users, encoder, tokenIssuer, selection);
         var verifier = mock(GoogleIdTokenVerifier.class);
         var identities = mock(GoogleIdentityRepository.class);
-        var googleLogin = new GoogleAuthenticationService(verifier, identities, tokenIssuer, selection);
+        var googleLogin = new GoogleAuthenticationService(verifier, identities, tokenIssuer, selection, users, mock(AuthOtpService.class));
         for (RoleName stored : List.of(RoleName.LANDLORD, RoleName.SUBLESSOR, RoleName.RENTER)) {
             UUID id = UUID.randomUUID();
             insertUser(id, stored.name(), "ACTIVE");
@@ -172,6 +172,109 @@ class RoleMigrationIntegrationTest {
                 INSERT INTO users(id,full_name,email,phone_ciphertext,account_status)
                 VALUES(?,'Synthetic',?,?,'ACTIVE')
                 """, UUID.randomUUID(), UUID.randomUUID()+"@example.invalid", new byte[]{1}));
+    }
+
+    @Test void newGoogleRegistrationsPersistRealProtectedPhoneForEveryPublicRoleAndRejectDuplicates() {
+        var verifier = mock(GoogleIdTokenVerifier.class);
+        var identities = new JpaRepositoryFactory(em).getRepository(GoogleIdentityRepository.class);
+        var legal = mock(LegalAcceptanceService.class);
+        var otp = mock(AuthOtpService.class);
+        // Synthetic local keys only: never load the application's environment or customer data.
+        String testKey = Base64.getEncoder().encodeToString(new byte[32]);
+        var protection = new PhoneProtectionService(new com.makaohub.backend.auth.config.PhoneSecurityProperties(testKey, testKey));
+        var registration = new GoogleRegistrationService(verifier, identities, users, roles, userRoles, protection, legal, otp);
+        var challenge = new com.makaohub.backend.auth.api.OtpChallengeResponse(UUID.randomUUID(),
+                AuthOtpChallengePurpose.REGISTRATION, "••••@example.invalid", java.time.Instant.now().plusSeconds(300));
+        when(otp.startRegistration(any())).thenReturn(challenge);
+        for (RoleName role : List.of(RoleName.RENTER, RoleName.LANDLORD, RoleName.SUBLESSOR)) {
+            String email = UUID.randomUUID() + "@example.invalid";
+            String subject = UUID.randomUUID().toString();
+            String number = "+25471000000" + role.ordinal();
+            when(verifier.verify("synthetic-phone-token")).thenReturn(
+                    new GoogleIdTokenVerifier.VerifiedGoogleIdentity(subject, email, "Synthetic Google User"));
+            tx.executeWithoutResult(status -> {
+                assertSame(challenge, registration.register(new com.makaohub.backend.auth.api.GoogleRegistrationRequest(
+                        "synthetic-phone-token", null, number, role, true)));
+            });
+            tx.executeWithoutResult(status -> {
+                User user = users.findByEmailIgnoreCase(email).orElseThrow();
+                assertEquals(number, protection.decrypt(user.getPhoneCiphertext()));
+                assertNotNull(user.getPhoneLookupHash());
+                assertNull(user.getPasswordHash()); // Google login does not invent a password.
+                assertEquals(user.getId(), identities.findByGoogleSubject(subject).orElseThrow().getUser().getId());
+                assertEquals(role, userRoles.findAllByUser_Id(user.getId()).getFirst().getRole().getName());
+                assertEquals(VerificationStatus.NOT_STARTED,
+                        verifications.findByUserIdAndRole(user.getId(), role).orElseThrow().getStatus());
+            });
+            long count = users.count();
+            when(verifier.verify("duplicate-phone-token")).thenReturn(new GoogleIdTokenVerifier.VerifiedGoogleIdentity(
+                    UUID.randomUUID().toString(), UUID.randomUUID() + "@example.invalid", "Another Synthetic User"));
+            var error = assertThrows(com.makaohub.backend.auth.exception.RegistrationException.class,
+                    () -> tx.executeWithoutResult(status -> registration.register(
+                            new com.makaohub.backend.auth.api.GoogleRegistrationRequest(
+                                    "duplicate-phone-token", null, number, role, true))));
+            assertEquals(com.makaohub.backend.auth.exception.RegistrationException.Reason.PHONE_ALREADY_REGISTERED, error.getReason());
+            assertEquals(count, users.count());
+        }
+        verify(otp, times(3)).startRegistration(any());
+    }
+
+    @Test void phoneCompletionSerializesSameAccountAndUniqueConstraintProtectsDifferentAccounts() throws Exception {
+        String testKey = Base64.getEncoder().encodeToString(new byte[32]);
+        var protection = new PhoneProtectionService(new com.makaohub.backend.auth.config.PhoneSecurityProperties(testKey, testKey));
+        var completion = new com.makaohub.backend.profile.service.ProfileService(users, userRoles, protection,
+                mock(com.makaohub.backend.storage.service.SupabaseStorageClient.class), verifications);
+        UUID first = missingPhoneAccount();
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var start = new CountDownLatch(1);
+            Future<Boolean> a = pool.submit(() -> completeConcurrently(completion, first, "0710000100", start));
+            Future<Boolean> b = pool.submit(() -> completeConcurrently(completion, first, "0710000101", start));
+            start.countDown();
+            assertNotEquals(a.get(10, TimeUnit.SECONDS), b.get(10, TimeUnit.SECONDS));
+            String saved = tx.execute(status -> protection.decrypt(users.findById(first).orElseThrow().getPhoneCiphertext()));
+            assertTrue(List.of("+254710000100", "+254710000101").contains(saved));
+            tx.executeWithoutResult(status -> completion.completeMissingPhone(first, saved)); // Replayed same request succeeds.
+
+            UUID second = missingPhoneAccount(), third = missingPhoneAccount();
+            var separate = new CountDownLatch(1);
+            Future<Boolean> c = pool.submit(() -> completeConcurrently(completion, second, "0710000102", separate));
+            Future<Boolean> d = pool.submit(() -> completeConcurrently(completion, third, "0710000102", separate));
+            separate.countDown();
+            assertNotEquals(c.get(10, TimeUnit.SECONDS), d.get(10, TimeUnit.SECONDS));
+            assertEquals(1, sql.queryForObject("SELECT count(*) FROM users WHERE phone_lookup_hash=?",
+                    Integer.class, protection.protect("+254710000102").lookupHash()));
+        } finally { pool.shutdownNow(); }
+    }
+
+    private UUID missingPhoneAccount() {
+        return tx.execute(status -> {
+            User account = users.saveAndFlush(new User("Synthetic Legacy Account", UUID.randomUUID()+"@example.invalid", null, null));
+            userRoles.saveAndFlush(new UserRole(account, roles.findByName(RoleName.RENTER).orElseThrow(), null));
+            return account.getId();
+        });
+    }
+
+    private boolean completeConcurrently(com.makaohub.backend.profile.service.ProfileService service, UUID owner,
+                                         String phone, CountDownLatch start) throws InterruptedException {
+        assertTrue(start.await(5, TimeUnit.SECONDS));
+        try {
+            tx.executeWithoutResult(status -> service.completeMissingPhone(owner, phone));
+            return true;
+        } catch (org.springframework.dao.DataIntegrityViolationException conflict) {
+            return false;
+        } catch (org.hibernate.exception.ConstraintViolationException conflict) {
+            // This isolated harness creates repositories directly, without Spring's exception-translation postprocessor.
+            assertEquals("23505", conflict.getSQLState());
+            assertEquals("users_phone_lookup_hash_unique", conflict.getConstraintName());
+            return false;
+        } catch (com.makaohub.backend.auth.exception.RegistrationException conflict) {
+            assertEquals(com.makaohub.backend.auth.exception.RegistrationException.Reason.PHONE_ALREADY_REGISTERED, conflict.getReason());
+            return false;
+        } catch (org.springframework.web.server.ResponseStatusException conflict) {
+            assertEquals(409, conflict.getStatusCode().value());
+            return false;
+        }
     }
 
     @Test void migrationPreservesAccountsAndRequiresAnExplicitChoice() {
@@ -334,7 +437,8 @@ class RoleMigrationIntegrationTest {
         var sentCode = new java.util.concurrent.atomic.AtomicReference<String>();
         doAnswer(call -> { sentCode.set(call.getArgument(1)); return null; }).when(sender).sendCode(anyString(), anyString(), any());
         var properties = new EmailOtpProperties("sender@example.invalid", Base64.getEncoder().encodeToString(new byte[32]));
-        var service = new AuthOtpService(challenges, users, refresh, properties, sender, tokens, mock(PasswordEncoder.class), Clock.systemUTC());
+        var service = new AuthOtpService(challenges, users, refresh, properties, sender, tokens, mock(PasswordEncoder.class), Clock.systemUTC(),
+                repositories.getRepository(GoogleIdentityRepository.class));
         UUID id = tx.execute(status -> service.startLogin(users.findById(owner).orElseThrow()).challengeId());
         String correct = sentCode.get();
         assertTrue(correct.matches("[0-9]{6}"));
@@ -371,6 +475,83 @@ class RoleMigrationIntegrationTest {
         tx.executeWithoutResult(status -> assertEquals(AuthException.Reason.INVALID_OTP,
                 assertThrows(AuthException.class, () -> service.verifyLogin(staleId, staleCode)).getReason()));
         verify(tokens, times(1)).issue(any());
+    }
+
+    @Test void existingPasswordAccountsLinkGoogleOnlyAfterOtpWithConcurrentConsumption() throws Exception {
+        var repositories = new JpaRepositoryFactory(em);
+        var identities = repositories.getRepository(GoogleIdentityRepository.class);
+        var challenges = repositories.getRepository(AuthOtpChallengeRepository.class);
+        var refresh = repositories.getRepository(RefreshTokenRepository.class);
+        for (RoleName role : List.of(RoleName.RENTER, RoleName.LANDLORD, RoleName.SUBLESSOR)) {
+            UUID owner = UUID.randomUUID();
+            insertUser(owner, role.name(), "ACTIVE");
+            String subject = "synthetic-google-" + owner;
+            var sender = mock(EmailOtpClient.class);
+            var tokens = mock(AuthenticationTokenService.class);
+            var verifier = mock(GoogleIdTokenVerifier.class);
+            var sentCode = new java.util.concurrent.atomic.AtomicReference<String>();
+            doAnswer(call -> { sentCode.set(call.getArgument(1)); return null; })
+                    .when(sender).sendCode(anyString(), anyString(), any());
+            when(verifier.verify("synthetic-google-token")).thenReturn(
+                    new GoogleIdTokenVerifier.VerifiedGoogleIdentity(subject, owner + "@example.invalid", "Google Name"));
+            var otp = new AuthOtpService(challenges, users, refresh,
+                    new EmailOtpProperties("sender@example.invalid", Base64.getEncoder().encodeToString(new byte[32])),
+                    sender, tokens, mock(PasswordEncoder.class), Clock.systemUTC(), identities);
+            var google = new GoogleAuthenticationService(verifier, identities, tokens, selection, users, otp);
+            UUID challenge = tx.execute(status -> google.startLogin("synthetic-google-token", role).challengeId());
+            String correct = sentCode.get();
+            assertEquals(0, sql.queryForObject("SELECT count(*) FROM google_identities WHERE user_id=?", Integer.class, owner));
+            verifyNoInteractions(tokens);
+            String wrong = correct.equals("000000") ? "000001" : "000000";
+            tx.executeWithoutResult(status -> assertThrows(AuthException.class, () -> otp.verifyLogin(challenge, wrong)));
+            assertEquals(1, sql.queryForObject("SELECT attempt_count FROM auth_otp_challenges WHERE id=?", Integer.class, challenge));
+            assertEquals(0, sql.queryForObject("SELECT count(*) FROM google_identities WHERE user_id=?", Integer.class, owner));
+
+            var start = new CountDownLatch(1);
+            Callable<Boolean> consume = () -> {
+                assertTrue(start.await(5, TimeUnit.SECONDS));
+                return tx.execute(status -> {
+                    try { otp.verifyLogin(challenge, correct); return true; }
+                    catch (AuthException rejected) { return false; }
+                });
+            };
+            try (var executor = Executors.newFixedThreadPool(2)) {
+                var first = executor.submit(consume);
+                var second = executor.submit(consume);
+                start.countDown();
+                assertNotEquals(first.get(15, TimeUnit.SECONDS), second.get(15, TimeUnit.SECONDS));
+            }
+            verify(tokens, times(1)).issue(argThat(user -> user.getId().equals(owner)));
+            assertEquals(subject, sql.queryForObject("SELECT google_subject FROM google_identities WHERE user_id=?", String.class, owner));
+            assertEquals("synthetic-hash", sql.queryForObject("SELECT password_hash FROM users WHERE id=?", String.class, owner));
+            assertEquals(role, tx.execute(status -> userRoles.findAllByUser_Id(owner).getFirst().getRole().getName()));
+            // Subsequent Google login resolves the same user by immutable subject.
+            tx.executeWithoutResult(status -> assertEquals(owner, google.verifyIdentity("synthetic-google-token", role).getId()));
+            assertThrows(org.springframework.dao.DataIntegrityViolationException.class,
+                    () -> sql.update("INSERT INTO google_identities (user_id, google_subject) VALUES (?, ?)", landlord, subject));
+        }
+    }
+
+    @Test void googleLinkAndOtpConsumptionRollbackTogetherWhenSessionIssuanceFails() {
+        UUID owner = UUID.randomUUID();
+        insertUser(owner, "RENTER", "ACTIVE");
+        var repositories = new JpaRepositoryFactory(em);
+        var sender = mock(EmailOtpClient.class);
+        var tokens = mock(AuthenticationTokenService.class);
+        var code = new java.util.concurrent.atomic.AtomicReference<String>();
+        doAnswer(call -> { code.set(call.getArgument(1)); return null; })
+                .when(sender).sendCode(anyString(), anyString(), any());
+        var otp = new AuthOtpService(repositories.getRepository(AuthOtpChallengeRepository.class), users,
+                repositories.getRepository(RefreshTokenRepository.class),
+                new EmailOtpProperties("sender@example.invalid", Base64.getEncoder().encodeToString(new byte[32])),
+                sender, tokens, mock(PasswordEncoder.class), Clock.systemUTC(), repositories.getRepository(GoogleIdentityRepository.class));
+        UUID challenge = tx.execute(status -> otp.startGoogleLogin(users.findById(owner).orElseThrow(), "rollback-google-subject").challengeId());
+        doThrow(new IllegalStateException("Synthetic session failure")).when(tokens).issue(any());
+        assertThrows(IllegalStateException.class, () -> tx.executeWithoutResult(status -> otp.verifyLogin(challenge, code.get())));
+        assertEquals(0, sql.queryForObject("SELECT count(*) FROM google_identities WHERE user_id=?", Integer.class, owner));
+        assertEquals("PENDING", sql.queryForObject("SELECT status FROM auth_otp_challenges WHERE id=?", String.class, challenge));
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class,
+                () -> sql.update("UPDATE auth_otp_challenges SET purpose='PASSWORD_RESET' WHERE id=?", challenge));
     }
 
     @Test void landlordReadinessQueryCannotReturnAnotherOwnersDocuments() {

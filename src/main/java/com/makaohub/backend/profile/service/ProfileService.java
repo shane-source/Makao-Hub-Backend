@@ -8,6 +8,8 @@ import com.makaohub.backend.auth.exception.AuthException;
 import com.makaohub.backend.auth.repository.UserRepository;
 import com.makaohub.backend.auth.repository.UserRoleRepository;
 import com.makaohub.backend.auth.service.PhoneProtectionService;
+import com.makaohub.backend.auth.service.KenyanPhoneNumberNormalizer;
+import com.makaohub.backend.auth.exception.RegistrationException;
 import com.makaohub.backend.profile.api.MyProfileResponse;
 import com.makaohub.backend.storage.service.SupabaseStorageClient;
 import com.makaohub.backend.verification.domain.RoleVerification;
@@ -15,6 +17,8 @@ import com.makaohub.backend.verification.domain.VerificationStatus;
 import com.makaohub.backend.verification.repository.RoleVerificationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Objects;
@@ -121,5 +125,30 @@ public class ProfileService {
                 AuthException.Reason.ACCOUNT_UNAVAILABLE,
                 "The account is unavailable."
         );
+    }
+
+    @Transactional
+    public void completeMissingPhone(UUID authenticatedUserId, String phoneNumber) {
+        User user = userRepository.findByIdForUpdate(Objects.requireNonNull(authenticatedUserId))
+                .orElseThrow(ProfileService::accountUnavailable);
+        if (user.getAccountStatus() != AccountStatus.ACTIVE) throw accountUnavailable();
+        List<UserRole> roles = userRoleRepository.findAllByUser_Id(authenticatedUserId);
+        if (roles.size() != 1 || !List.of(RoleName.RENTER, RoleName.LANDLORD, RoleName.SUBLESSOR)
+                .contains(roles.getFirst().getRole().getName())) throw accountUnavailable();
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            throw new RegistrationException(RegistrationException.Reason.INVALID_PHONE_NUMBER,
+                    "Enter your Kenyan mobile number.");
+        }
+        var protectedPhone = phoneProtectionService.protect(KenyanPhoneNumberNormalizer.normalize(phoneNumber));
+        if (user.getPhoneLookupHash() != null) {
+            if (user.getPhoneLookupHash().equals(protectedPhone.lookupHash())) return; // Safe retry after a lost response.
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Phone is already configured. Contact support to change it.");
+        }
+        if (userRepository.existsByPhoneLookupHash(protectedPhone.lookupHash())) {
+            throw new RegistrationException(RegistrationException.Reason.PHONE_ALREADY_REGISTERED,
+                    "An account already exists for this phone number.");
+        }
+        user.completeMissingPhone(protectedPhone.ciphertext(), protectedPhone.lookupHash());
+        userRepository.flush(); // The existing unique constraint also arbitrates cross-account races.
     }
 }

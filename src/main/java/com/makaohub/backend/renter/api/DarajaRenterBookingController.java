@@ -18,9 +18,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.UUID;
 
-/** Renter booking endpoints used when the Daraja profile is active. */
+/** Renter booking endpoints used with the Daraja or Paystack provider. */
 @RestController
-@Profile("daraja")
+@Profile({"daraja", "paystack"})
 @RequestMapping("/api/v1/renter/bookings")
 public class DarajaRenterBookingController {
 

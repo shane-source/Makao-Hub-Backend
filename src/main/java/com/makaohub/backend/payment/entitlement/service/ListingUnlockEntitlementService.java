@@ -6,6 +6,7 @@ import com.makaohub.backend.payment.domain.PaymentType;
 import com.makaohub.backend.payment.entitlement.domain.ListingUnlockEntitlement;
 import com.makaohub.backend.payment.entitlement.domain.ListingUnlockStatus;
 import com.makaohub.backend.payment.entitlement.repository.ListingUnlockEntitlementRepository;
+import com.makaohub.backend.payment.service.LandlordOfferService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,13 +17,17 @@ import java.util.UUID;
 public class ListingUnlockEntitlementService {
 
     private final ListingUnlockEntitlementRepository repository;
+    private final LandlordOfferService landlordOffers;
 
-    public ListingUnlockEntitlementService(ListingUnlockEntitlementRepository repository) {
+    public ListingUnlockEntitlementService(ListingUnlockEntitlementRepository repository,
+            LandlordOfferService landlordOffers) {
         this.repository = repository;
+        this.landlordOffers = landlordOffers;
     }
 
     @Transactional
     public void activateForSuccessfulPayment(PaymentIntent intent) {
+        landlordOffers.activate(intent);
         if (intent.getStatus() != PaymentStatus.SUCCEEDED
                 || !isListingUnlock(intent.getPaymentType())
                 || intent.getListingId() == null) {

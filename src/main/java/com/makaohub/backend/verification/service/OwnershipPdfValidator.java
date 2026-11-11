@@ -10,21 +10,16 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-/** Scan first, then accept only bounded, readable PDFs without interactive/embedded payloads. */
+/** Structural PDF validation only; no malware scan is performed. */
 @Service
 public class OwnershipPdfValidator {
     private static final Set<String> BLOCKED_KEYS = Set.of("JS", "JavaScript", "AA", "OpenAction",
             "EmbeddedFiles", "EF", "XFA", "AcroForm", "RichMediaContent", "RichMediaSettings");
     private static final Set<String> BLOCKED_ACTIONS = Set.of("JavaScript", "Launch", "GoToR", "GoToE",
             "SubmitForm", "ImportData", "URI", "Rendition", "Movie", "Sound");
-    private final ClamAvScanner scanner;
-
-    public OwnershipPdfValidator(ClamAvScanner scanner) { this.scanner = scanner; }
-
     public void validate(byte[] bytes) {
         if (bytes == null || bytes.length < 8 || bytes.length > 10_485_760
                 || !new String(bytes, 0, 5, StandardCharsets.US_ASCII).equals("%PDF-")) throw invalid();
-        scanner.assertClean(bytes);
         try (var pdf = Loader.loadPDF(bytes)) {
             if (pdf.isEncrypted() || pdf.getNumberOfPages() < 1 || pdf.getNumberOfPages() > 100) throw invalid();
             var visited = Collections.newSetFromMap(new IdentityHashMap<COSBase, Boolean>());

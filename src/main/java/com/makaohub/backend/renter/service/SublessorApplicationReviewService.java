@@ -29,19 +29,22 @@ public class SublessorApplicationReviewService {
     private final SublessorListingRepository listingRepository;
     private final SublessorRentalApplicationRepository applicationRepository;
     private final NotificationService notificationService;
+    private final ApplicationApplicantDetails applicantDetails;
 
     public SublessorApplicationReviewService(
             UserRepository userRepository,
             UserRoleRepository userRoleRepository,
             SublessorListingRepository listingRepository,
             SublessorRentalApplicationRepository applicationRepository,
-            NotificationService notificationService
+            NotificationService notificationService,
+            ApplicationApplicantDetails applicantDetails
     ) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
         this.listingRepository = listingRepository;
         this.applicationRepository = applicationRepository;
         this.notificationService = notificationService;
+        this.applicantDetails = applicantDetails;
     }
 
     @Transactional(readOnly = true)
@@ -181,13 +184,15 @@ public class SublessorApplicationReviewService {
     private RentalApplicationResponse toResponse(
             SublessorRentalApplication application
     ) {
+        var applicant = applicantDetails.forApplicant(application.getRenterId());
         return new RentalApplicationResponse(
                 application.getId(),
                 application.getSublessorListingId(),
                 application.getStatus(),
                 application.getCreatedAt(),
                 application.getUpdatedAt(),
-                application.getRejectionReason()
+                application.getRejectionReason(),
+                applicant.name, applicant.avatarUrl, applicant.verificationStatus
         );
     }
 

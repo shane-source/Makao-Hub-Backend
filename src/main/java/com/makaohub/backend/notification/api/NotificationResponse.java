@@ -17,6 +17,7 @@ public record NotificationResponse(
 
         boolean read,
 
-        Instant createdAt
+        Instant createdAt,
+        UUID bookingId
 ) {
 }

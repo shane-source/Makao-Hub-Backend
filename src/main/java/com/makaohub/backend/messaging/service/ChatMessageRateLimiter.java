@@ -21,6 +21,11 @@ public class ChatMessageRateLimiter {
             .expireAfterAccess(Duration.ofHours(2))
             .build();
 
+    private final Cache<UUID, Bucket> deliveryBuckets = Caffeine.newBuilder()
+            .maximumSize(50_000)
+            .expireAfterAccess(Duration.ofHours(2))
+            .build();
+
     public ChatMessageRateLimiter(
             WebSocketSecurityProperties properties
     ) {
@@ -51,5 +56,12 @@ public class ChatMessageRateLimiter {
                         )
                 )
                 .build();
+    }
+
+    /** Same configured limit, separate budget so receiving messages does not consume the send allowance. */
+    public void requireDeliveryPermission(UUID userId) {
+        if (!deliveryBuckets.get(userId, ignored -> newBucket()).tryConsume(1)) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Too many delivery acknowledgements.");
+        }
     }
 }

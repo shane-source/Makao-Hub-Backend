@@ -69,17 +69,18 @@ public class GoogleRegistrationService {
             );
         }
 
-        // Google does not provide a phone number. Legacy clients may still send one.
-        PhoneProtectionService.ProtectedPhone protectedPhone = null;
-        if (request.phoneNumber() != null && !request.phoneNumber().isBlank()) {
-            String normalizedPhone = KenyanPhoneNumberNormalizer.normalize(request.phoneNumber());
-            protectedPhone = phoneProtectionService.protect(normalizedPhone);
-            if (userRepository.existsByPhoneLookupHash(protectedPhone.lookupHash())) {
-                throw new RegistrationException(
-                        RegistrationException.Reason.PHONE_ALREADY_REGISTERED,
-                        "An account already exists for this phone number."
-                );
-            }
+        // Google supplies identity, not a phone. Require the user's own number, including for non-HTTP callers.
+        if (request.phoneNumber() == null || request.phoneNumber().isBlank()) {
+            throw new RegistrationException(RegistrationException.Reason.INVALID_PHONE_NUMBER,
+                    "Enter your phone number to create your Google account.");
+        }
+        String normalizedPhone = KenyanPhoneNumberNormalizer.normalize(request.phoneNumber());
+        PhoneProtectionService.ProtectedPhone protectedPhone = phoneProtectionService.protect(normalizedPhone);
+        if (userRepository.existsByPhoneLookupHash(protectedPhone.lookupHash())) {
+            throw new RegistrationException(
+                    RegistrationException.Reason.PHONE_ALREADY_REGISTERED,
+                    "An account already exists for this phone number."
+            );
         }
 
         Role role = roleRepository.findByName(request.role())
@@ -103,8 +104,8 @@ public class GoogleRegistrationService {
                 new User(
                         fullName,
                         googleIdentity.email(),
-                        protectedPhone == null ? null : protectedPhone.ciphertext(),
-                        protectedPhone == null ? null : protectedPhone.lookupHash()
+                        protectedPhone.ciphertext(),
+                        protectedPhone.lookupHash()
                 )
         );
 

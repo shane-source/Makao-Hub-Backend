@@ -50,6 +50,7 @@ public record PublicListingResponse(
 
         short approximateRadiusMeters,
 
-        Instant updatedAt
+        Instant updatedAt,
+        boolean sponsored
 ) {
 }

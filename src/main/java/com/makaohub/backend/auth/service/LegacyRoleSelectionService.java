@@ -42,6 +42,20 @@ public class LegacyRoleSelectionService {
         }
     }
 
+    /** Credential-proven self-deactivated users may confirm only their stored public role. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void resolveForReactivation(User user, RoleName expectedRole) {
+        entityManager.refresh(user, LockModeType.PESSIMISTIC_WRITE);
+        if (user.getAccountStatus() != AccountStatus.DEACTIVATED || user.isRoleSelectionRequired()
+                || expectedRole == null || expectedRole == RoleName.ADMIN) {
+            throw new AuthException(AuthException.Reason.ACCOUNT_UNAVAILABLE, "This account is unavailable.");
+        }
+        var assignments = userRoles.findAllByUser_Id(user.getId());
+        if (assignments.size() != 1 || assignments.getFirst().getRole().getName() != expectedRole) {
+            throw new AuthException(AuthException.Reason.ROLE_MISMATCH, "This account does not match the selected role.");
+        }
+    }
+
     // Called only AFTER password or Google credentials have been verified.
     // MANDATORY keeps the role choice, audit and token issuance in the login transaction.
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)

@@ -57,10 +57,6 @@ logging:
 
 security:
   verification:
-    # Debian/Ubuntu's clamd package exposes this local Unix socket by default.
-    # Deployments with a different path must set CLAMAV_SOCKET_PATH; if the
-    # socket is absent or unreachable, document confirmation still fails closed.
-    clamav-socket-path: ${CLAMAV_SOCKET_PATH:/var/run/clamav/clamd.ctl}
     tesseract-path: ${TESSERACT_PATH:/usr/bin/tesseract}
 
   phone:
@@ -124,6 +120,8 @@ makao:
     enabled: ${MAKAO_PAYSTACK_ENABLED:false}
     base-url: ${MAKAO_PAYSTACK_BASE_URL:https://api.paystack.co}
     secret-key: ${MAKAO_PAYSTACK_SECRET_KEY:}
+    checkout-return-url: ${MAKAO_PAYSTACK_CHECKOUT_RETURN_URL:}
+    test-transfers-enabled: ${MAKAO_PAYSTACK_TEST_TRANSFERS_ENABLED:true}
   payment:
     prices:
       exact-location-unlock-minor: ${MAKAO_EXACT_LOCATION_UNLOCK_MINOR:}

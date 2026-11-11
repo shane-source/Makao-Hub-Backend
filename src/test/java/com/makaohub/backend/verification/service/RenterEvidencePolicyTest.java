@@ -146,6 +146,20 @@ class RenterEvidencePolicyTest {
         verifyNoInteractions(storage, image);
     }
 
+    @Test void mismatchedIdNamesCannotEnterReview() {
+        var front = document(VerificationDocumentType.ID_FRONT, "image/jpeg");
+        var back = document(VerificationDocumentType.ID_BACK, "image/jpeg");
+        var selfie = document(VerificationDocumentType.SELFIE, "image/jpeg");
+        front.markReady(100); back.markReady(100); selfie.markReady(100);
+        when(documents.findAllByRenterIdAndStatus(actor, VerificationDocumentStatus.READY))
+                .thenReturn(List.of(front, back, selfie));
+        doThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST)).when(image).assertMatchingStoredIdNames(
+                eq(storage), anyString(), anyLong(), anyString(), anyLong());
+        assertEquals(400, assertThrows(ResponseStatusException.class,
+                () -> service.submitMyVerification(actor)).getStatusCode().value());
+        verify(verification, never()).save(any());
+    }
+
     private RenterVerificationDocument document(VerificationDocumentType type, String mime) {
         return new RenterVerificationDocument(actor, type, actor + "/renter-evidence-v1/synthetic.jpg", mime);
     }

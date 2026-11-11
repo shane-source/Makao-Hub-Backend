@@ -111,18 +111,31 @@ class RegistrationContractTest {
         verifyNoInteractions(otp);
     }
 
-    @Test void googleSignupAcceptsNoPhoneOrManualName() throws Exception {
+    @Test void googleSignupRequiresPhoneButCanUseGoogleName() throws Exception {
         when(googleRegistration.register(any())).thenReturn(new OtpChallengeResponse(
                 java.util.UUID.randomUUID(), AuthOtpChallengePurpose.REGISTRATION,
                 "••••@example.invalid", java.time.Instant.now().plusSeconds(300)));
         mvc.perform(post("/api/v1/auth/google/register").contentType(MediaType.APPLICATION_JSON).content("""
-                {"idToken":"synthetic-token","role":"LANDLORD","termsAndPrivacyAccepted":true}
+                {"idToken":"synthetic-token","phoneNumber":"+254712345678","role":"LANDLORD","termsAndPrivacyAccepted":true}
                 """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.purpose").value("REGISTRATION"))
                 .andExpect(jsonPath("$.accessToken").doesNotExist());
-        verify(googleRegistration).register(argThat(r -> r.phoneNumber() == null
+        verify(googleRegistration).register(argThat(r -> "+254712345678".equals(r.phoneNumber())
                 && r.fullName() == null && r.role().name().equals("LANDLORD")));
+    }
+
+    @Test void googleSignupRejectsMissingBlankAndInvalidPhonesBeforeCreatingAccounts() throws Exception {
+        int address = 120;
+        for (String phone : new String[]{"", ",\"phoneNumber\":null", ",\"phoneNumber\":\"\"",
+                ",\"phoneNumber\":\" \"", ",\"phoneNumber\":\"invalid\""}) {
+            String ip = "192.0.2." + address++;
+            mvc.perform(post("/api/v1/auth/google/register").contentType(MediaType.APPLICATION_JSON)
+                    .with(request -> { request.setRemoteAddr(ip); return request; })
+                    .content("{\"idToken\":\"synthetic-token\",\"role\":\"RENTER\",\"termsAndPrivacyAccepted\":true" + phone + "}"))
+                    .andExpect(status().isBadRequest());
+        }
+        verifyNoInteractions(googleRegistration);
     }
 
     @Test void normalSignupStillRequiresPhoneAndGoogleStillRequiresConsent() throws Exception {
@@ -130,7 +143,7 @@ class RegistrationContractTest {
                 .content(body("\"RENTER\"").replace("+254712345678", "")))
                 .andExpect(status().isBadRequest());
         mvc.perform(post("/api/v1/auth/google/register").contentType(MediaType.APPLICATION_JSON).content("""
-                {"idToken":"synthetic-token","role":"RENTER","termsAndPrivacyAccepted":false}
+                {"idToken":"synthetic-token","phoneNumber":"0712345678","role":"RENTER","termsAndPrivacyAccepted":false}
                 """))
                 .andExpect(status().isBadRequest());
         verifyNoInteractions(registration, googleRegistration);
@@ -175,7 +188,7 @@ class RegistrationContractTest {
     @Test void loginForwardsTheSelectionAndNeverIssuesOtpOnRoleMismatch() throws Exception {
         when(login.verifyCredentials(any())).thenThrow(new AuthException(AuthException.Reason.ROLE_MISMATCH,
                 "This account does not match the selected role."));
-        when(googleLogin.verifyIdentity(anyString(), any())).thenThrow(new AuthException(AuthException.Reason.ROLE_MISMATCH,
+        when(googleLogin.startLogin(anyString(), any())).thenThrow(new AuthException(AuthException.Reason.ROLE_MISMATCH,
                 "This account does not match the selected role."));
         mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -189,16 +202,17 @@ class RegistrationContractTest {
                         """))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("ROLE_MISMATCH"));
         verify(login).verifyCredentials(argThat(r -> r.expectedRole() == RoleName.RENTER));
-        verify(googleLogin).verifyIdentity("synthetic-token", RoleName.RENTER);
+        verify(googleLogin).startLogin("synthetic-token", RoleName.RENTER);
         verifyNoInteractions(otp, tokens);
     }
 
     @Test void matchingPasswordAndGoogleLoginStillReturnOnlyAnOtpChallenge() throws Exception {
         User user = mock(User.class);
         when(login.verifyCredentials(any())).thenReturn(user);
-        when(googleLogin.verifyIdentity(anyString(), any())).thenReturn(user);
-        when(otp.startLogin(user)).thenReturn(new OtpChallengeResponse(java.util.UUID.randomUUID(),
-                AuthOtpChallengePurpose.LOGIN, "••••@example.invalid", java.time.Instant.now().plusSeconds(300)));
+        var challenge = new OtpChallengeResponse(java.util.UUID.randomUUID(),
+                AuthOtpChallengePurpose.LOGIN, "••••@example.invalid", java.time.Instant.now().plusSeconds(300));
+        when(googleLogin.startLogin(anyString(), any())).thenReturn(challenge);
+        when(otp.startLogin(user)).thenReturn(challenge);
         for (String path : new String[]{"login", "google"}) {
             mvc.perform(post("/api/v1/auth/" + path).contentType(MediaType.APPLICATION_JSON)
                     .content("""

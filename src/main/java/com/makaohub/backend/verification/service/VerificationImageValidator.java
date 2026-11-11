@@ -1,6 +1,7 @@
 package com.makaohub.backend.verification.service;
 
 import com.makaohub.backend.verification.domain.VerificationDocumentType;
+import com.makaohub.backend.storage.service.SupabaseStorageClient;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -14,13 +15,11 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
-/** Independent server decoding/re-encoding; never trust client MIME or metadata stripping. */
+/** Independent server decoding/re-encoding and ID OCR; no malware scan is performed. */
 @Service
 public class VerificationImageValidator {
-    private final ClamAvScanner scanner;
     private final KenyanNationalIdValidator nationalId;
-    public VerificationImageValidator(ClamAvScanner scanner, KenyanNationalIdValidator nationalId) {
-        this.scanner = scanner;
+    public VerificationImageValidator(KenyanNationalIdValidator nationalId) {
         this.nationalId = nationalId;
     }
 
@@ -33,7 +32,6 @@ public class VerificationImageValidator {
             case "image/png" -> "PNG";
             default -> throw invalid();
         };
-        scanner.assertClean(bytes);
         try (var input = new MemoryCacheImageInputStream(new ByteArrayInputStream(bytes))) {
             var readers = ImageIO.getImageReaders(input);
             if (!readers.hasNext()) throw invalid();
@@ -79,6 +77,22 @@ public class VerificationImageValidator {
                 } finally { decoded.flush(); normalized.flush(); }
             } finally { reader.dispose(); }
         } catch (IOException | IllegalArgumentException failure) { throw invalid(); }
+    }
+
+    /** Read only the owned, confirmed images for submission; never persist or return OCR names. */
+    public void assertMatchingStoredIdNames(SupabaseStorageClient storage, String frontPath, Long frontSize,
+            String backPath, Long backSize) {
+        if (frontSize == null || backSize == null) throw invalid();
+        byte[] front = null, back = null;
+        try {
+            front = storage.readVerificationDocument(frontPath, frontSize);
+            back = storage.readVerificationDocument(backPath, backSize);
+            if (front == null || back == null || front.length != frontSize || back.length != backSize) throw invalid();
+            nationalId.assertMatchingNames(front, back);
+        } finally {
+            if (front != null) java.util.Arrays.fill(front, (byte) 0);
+            if (back != null) java.util.Arrays.fill(back, (byte) 0);
+        }
     }
 
     private static ResponseStatusException invalid() {

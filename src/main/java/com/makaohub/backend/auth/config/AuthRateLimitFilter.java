@@ -38,6 +38,7 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
             Map.entry("/api/v1/auth/google", new RateLimit(10, Duration.ofMinutes(1))),
 
             Map.entry("/api/v1/auth/login/verify-otp", new RateLimit(10, Duration.ofMinutes(15))),
+            Map.entry("/api/v1/auth/reactivate/verify-otp", new RateLimit(10, Duration.ofMinutes(15))),
 
             Map.entry("/api/v1/auth/google/verify-otp", new RateLimit(10, Duration.ofMinutes(15))),
 
@@ -51,9 +52,14 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
 
             Map.entry("/api/v1/auth/logout", new RateLimit(30, Duration.ofMinutes(1))),
 
+            Map.entry("/api/v1/profile/me/phone/complete", new RateLimit(10, Duration.ofMinutes(15))),
+            Map.entry("/api/v1/profile/me/account-action/start", new RateLimit(5, Duration.ofHours(1))),
+            Map.entry("/api/v1/profile/me/account-action/confirm", new RateLimit(10, Duration.ofMinutes(15))),
             Map.entry("/api/v1/profile/me/role/google-challenge", new RateLimit(10, Duration.ofMinutes(15))),
 
-            Map.entry("/api/v1/profile/me/role/switch", new RateLimit(10, Duration.ofMinutes(15)))
+            Map.entry("/api/v1/profile/me/role/switch", new RateLimit(10, Duration.ofMinutes(15))),
+            Map.entry("/api/v1/landlord/payments/test-destination", new RateLimit(5, Duration.ofHours(1))),
+            Map.entry("/api/v1/sublessor/payments/test-destination", new RateLimit(5, Duration.ofHours(1)))
     );
 
     // ponytail: per-instance limits reset on restart or cache eviction.

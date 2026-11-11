@@ -12,6 +12,7 @@ class BookingCommissionServiceTest {
     @Test
     void chargesFivePercentOfRentPlusDepositAndRoundsUp() {
         assertEquals(60_250, service.commissionAmountMinor(1_200_000, 5_000));
+        assertEquals(400_000, service.commissionAmountMinor(4_000_000, 4_000_000));
         assertEquals(1, service.commissionAmountMinor(1, 1));
     }
 

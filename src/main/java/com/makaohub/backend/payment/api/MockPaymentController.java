@@ -139,12 +139,16 @@ public class MockPaymentController {
             PaymentType paymentType,
             UUID listingId
     ) {
+        if (paymentType == PaymentType.PLAN_UPGRADE || paymentType == PaymentType.BOOST) {
+            throw badRequest("Use the landlord offers checkout for plans and boosts.");
+        }
         if (paymentType == PaymentType.BOOKING) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
                     "Booking payments require the booking flow."
             );
         }
+
 
         if (paymentType == PaymentType.EXACT_LOCATION_UNLOCK
                 || paymentType == PaymentType.VIDEO_UNLOCK

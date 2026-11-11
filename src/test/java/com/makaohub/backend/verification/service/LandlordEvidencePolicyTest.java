@@ -153,6 +153,21 @@ class LandlordEvidencePolicyTest {
         verifyNoInteractions(storage, pdf, image);
     }
 
+    @Test void mismatchedIdNamesCannotEnterReview() {
+        var front = document(VerificationDocumentType.ID_FRONT, "image/jpeg");
+        var back = document(VerificationDocumentType.ID_BACK, "image/jpeg");
+        var selfie = document(VerificationDocumentType.SELFIE, "image/jpeg");
+        var proof = document(VerificationDocumentType.OWNERSHIP_PROOF, "application/pdf");
+        front.markReady(100); back.markReady(100); selfie.markReady(100); proof.markReady(100);
+        when(documents.findAllByLandlordIdAndStatus(actor, VerificationDocumentStatus.READY))
+                .thenReturn(List.of(front, back, selfie, proof));
+        doThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST)).when(image).assertMatchingStoredIdNames(
+                eq(storage), anyString(), anyLong(), anyString(), anyLong());
+        assertEquals(400, assertThrows(ResponseStatusException.class,
+                () -> service.submitMyVerification(actor)).getStatusCode().value());
+        verify(verification, never()).save(any());
+    }
+
     private LandlordVerificationDocument document(VerificationDocumentType type, String mime) {
         return new LandlordVerificationDocument(actor, type, actor + "/evidence-v1/synthetic.pdf", mime);
     }

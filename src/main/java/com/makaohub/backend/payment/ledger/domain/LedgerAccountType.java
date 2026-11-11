@@ -4,5 +4,6 @@ public enum LedgerAccountType {
     RENTER_CLEARING,
     ESCROW_HOLD,
     PLATFORM_REVENUE,
-    OWNER_PAYABLE
+    OWNER_PAYABLE,
+    OWNER_PAYOUT
 }

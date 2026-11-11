@@ -22,8 +22,9 @@ public record GoogleRegistrationRequest(
         @Size(max = 150)
         String fullName,
 
+        @NotBlank(message = "Enter your phone number to create your Google account.")
         @Pattern(
-                regexp = "^(?:(?:\\+254|254|0)(?:1|7)\\d{8})?$",
+                regexp = "^(?:\\+254|254|0)(?:1|7)\\d{8}$",
                 message = "Phone number must be a valid Kenyan mobile number."
         )
         String phoneNumber,

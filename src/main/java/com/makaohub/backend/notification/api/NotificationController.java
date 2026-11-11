@@ -1,6 +1,7 @@
 package com.makaohub.backend.notification.api;
 
 import com.makaohub.backend.auth.exception.AuthException;
+import com.makaohub.backend.auth.domain.RoleName;
 import com.makaohub.backend.notification.service.NotificationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -49,6 +50,11 @@ public class NotificationController {
     }
 
     private UUID extractUserId(Jwt jwt) {
+        if (jwt == null) throw accountUnavailable();
+        List<String> roles = jwt.getClaimAsStringList("roles");
+        if (roles == null || roles.size() != 1) throw accountUnavailable();
+        try { RoleName.valueOf(roles.getFirst()); }
+        catch (IllegalArgumentException | NullPointerException failure) { throw accountUnavailable(); }
         String subject = jwt.getSubject();
 
         if (subject == null) {

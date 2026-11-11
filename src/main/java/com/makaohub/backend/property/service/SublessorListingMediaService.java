@@ -8,6 +8,7 @@ import com.makaohub.backend.auth.repository.UserRoleRepository;
 import com.makaohub.backend.property.api.CreateListingMediaUploadRequest;
 import com.makaohub.backend.property.api.ListingMediaResponse;
 import com.makaohub.backend.property.api.ListingMediaUploadResponse;
+import com.makaohub.backend.property.api.PublicListingMediaResponse;
 import com.makaohub.backend.property.domain.ListingMediaType;
 import com.makaohub.backend.property.domain.ListingStatus;
 import com.makaohub.backend.property.domain.SublessorListing;
@@ -205,6 +206,32 @@ public class SublessorListingMediaService {
                 )
                 .stream()
                 .map(this::toResponse)
+                .toList();
+    }
+
+    public List<PublicListingMediaResponse> findPhotosForOwner(
+            UUID sublessorId,
+            UUID listingId
+    ) {
+        requireActiveSublessor(sublessorId);
+
+        listingRepository.findByIdAndSublessorId(listingId, sublessorId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Listing not found."
+                ));
+
+        return mediaRepository
+                .findAllBySublessorListingIdAndConfirmedAtIsNotNullOrderBySortOrderAsc(listingId)
+                .stream()
+                .filter(media -> media.getMediaType() == ListingMediaType.IMAGE)
+                .map(media -> new PublicListingMediaResponse(
+                        media.getId(),
+                        media.getMediaType(),
+                        media.getContentType(),
+                        media.getSortOrder(),
+                        storageClient.createSignedListingMediaReadUrl(media.getObjectPath())
+                ))
                 .toList();
     }
 

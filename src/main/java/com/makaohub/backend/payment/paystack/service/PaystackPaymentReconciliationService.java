@@ -1,7 +1,5 @@
 package com.makaohub.backend.payment.paystack.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.makaohub.backend.payment.audit.domain.PaymentAuditEventType;
 import com.makaohub.backend.payment.audit.service.MockPaymentAuditService;
 import com.makaohub.backend.payment.domain.PaymentIntent;
@@ -20,6 +18,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -42,8 +42,9 @@ public class PaystackPaymentReconciliationService {
     private final MockEscrowLedgerService escrowLedgerService;
     private final MockPaymentAuditService auditService;
     private final PaystackWebhookReceiptRepository receiptRepository;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
     private final String webhookSecret;
+    private final org.springframework.beans.factory.ObjectProvider<BookingTestPayoutService> payouts;
 
     public PaystackPaymentReconciliationService(
             PaymentIntentRepository paymentIntentRepository,
@@ -53,8 +54,9 @@ public class PaystackPaymentReconciliationService {
             MockEscrowLedgerService escrowLedgerService,
             MockPaymentAuditService auditService,
             PaystackWebhookReceiptRepository receiptRepository,
-            ObjectMapper objectMapper,
-            com.makaohub.backend.payment.paystack.config.PaystackProperties properties
+            JsonMapper jsonMapper,
+            com.makaohub.backend.payment.paystack.config.PaystackProperties properties,
+            org.springframework.beans.factory.ObjectProvider<BookingTestPayoutService> payouts
     ) {
         this.paymentIntentRepository = paymentIntentRepository;
         this.paystackClient = paystackClient;
@@ -63,8 +65,9 @@ public class PaystackPaymentReconciliationService {
         this.escrowLedgerService = escrowLedgerService;
         this.auditService = auditService;
         this.receiptRepository = receiptRepository;
-        this.objectMapper = objectMapper;
+        this.jsonMapper = jsonMapper;
         this.webhookSecret = properties.secretKey();
+        this.payouts = payouts;
     }
 
     @Transactional
@@ -90,7 +93,19 @@ public class PaystackPaymentReconciliationService {
             return intent;
         }
 
-        if (!"success".equalsIgnoreCase(result.status())) {
+        String providerStatus = result.status() == null ? "" : result.status().strip().toLowerCase(java.util.Locale.ROOT);
+        if ("pending".equals(providerStatus) || "ongoing".equals(providerStatus)
+                || "processing".equals(providerStatus) || "queued".equals(providerStatus)
+                || "abandoned".equals(providerStatus)) {
+            return intent;
+        }
+        if (!"success".equals(providerStatus) && !"failed".equals(providerStatus)) {
+            intent.markDisputed();
+            intent = paymentIntentRepository.save(intent);
+            auditService.recordPaymentDisputed(intent);
+            return intent;
+        }
+        if ("failed".equals(providerStatus)) {
             intent.markFailed();
             intent = paymentIntentRepository.save(intent);
             auditService.recordProviderResult(intent, PaymentAuditEventType.PROVIDER_FAILED);
@@ -111,11 +126,16 @@ public class PaystackPaymentReconciliationService {
         verifySignature(signature, rawBody);
         JsonNode payload;
         try {
-            payload = objectMapper.readTree(rawBody);
+            payload = jsonMapper.readTree(rawBody);
         } catch (Exception exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid webhook JSON.");
         }
         String event = text(payload, "event");
+        if (event!=null && java.util.List.of("transfer.success","transfer.failed","transfer.reversed").contains(event)) {
+            var service=payouts.getIfAvailable();
+            if(service!=null) service.reconcileReference(text(payload.path("data"),"reference"));
+            return;
+        }
         if (!"charge.success".equals(event)) {
             return;
         }
@@ -150,6 +170,8 @@ public class PaystackPaymentReconciliationService {
             }
         } catch (IllegalArgumentException exception) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid webhook signature.");
+        } catch (ResponseStatusException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new IllegalStateException("Webhook signature validation failed.", exception);
         }

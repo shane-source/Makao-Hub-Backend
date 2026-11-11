@@ -45,7 +45,8 @@ class LandlordListingDetailsTest {
                 mock(ListingLocationRepository.class),
                 mock(ListingMediaRepository.class),
                 mock(RoleVerificationRepository.class),
-                mock(SupabaseStorageClient.class)
+                mock(SupabaseStorageClient.class),
+                mock(com.makaohub.backend.payment.service.LandlordOfferService.class)
         );
 
         var response = service.createDraft(

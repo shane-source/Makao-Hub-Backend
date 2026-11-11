@@ -17,6 +17,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
@@ -87,5 +88,23 @@ class PublicAdminRegistrationTest {
                 phoneProtectionService, legalAcceptanceService,
                 authOtpService
         );
+    }
+
+    @Test
+    void sublessorEmailCannotRegisterAsRenterOrLandlord() {
+        when(userRepository.existsByEmailIgnoreCase("sublessor@example.invalid")).thenReturn(true);
+
+        for (RoleName attemptedRole : new RoleName[]{RoleName.RENTER, RoleName.LANDLORD}) {
+            RegisterRequest request = new RegisterRequest(
+                    "Test Applicant", "  SUBLESSOR@EXAMPLE.INVALID  ", "+254712345678",
+                    "TestOnlyPassword123!", attemptedRole, true);
+
+            RegistrationException exception = assertThrows(RegistrationException.class,
+                    () -> registrationService.register(request));
+            assertEquals(RegistrationException.Reason.EMAIL_ALREADY_REGISTERED, exception.getReason());
+        }
+
+        verifyNoInteractions(roleRepository, userRoleRepository, passwordEncoder,
+                phoneProtectionService, legalAcceptanceService, authOtpService);
     }
 }

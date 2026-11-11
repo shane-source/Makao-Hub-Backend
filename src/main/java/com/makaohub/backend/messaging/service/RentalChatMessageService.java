@@ -8,6 +8,7 @@ import com.makaohub.backend.auth.repository.UserRoleRepository;
 import com.makaohub.backend.messaging.api.RentalChatMessagePageResponse;
 import com.makaohub.backend.messaging.api.RentalChatMessageResponse;
 import com.makaohub.backend.messaging.api.SendRentalChatMessageRequest;
+import com.makaohub.backend.messaging.api.AcknowledgeChatMessagesRequest;
 import com.makaohub.backend.messaging.domain.ChatThreadStatus;
 import com.makaohub.backend.messaging.domain.RentalChatMessage;
 import com.makaohub.backend.messaging.domain.RentalChatThread;
@@ -54,6 +55,7 @@ public class RentalChatMessageService {
     private final RentalChatThreadRepository threadRepository;
     private final RentalChatMessageRepository messageRepository;
     private final ChatContactMaskingService maskingService;
+    private final ChatNumericGroupCounter numericGroupCounter;
     private final ChatMessageRateLimiter rateLimiter;
 
     public RentalChatMessageService(
@@ -63,6 +65,7 @@ public class RentalChatMessageService {
             RentalChatThreadRepository threadRepository,
             RentalChatMessageRepository messageRepository,
             ChatContactMaskingService maskingService,
+            ChatNumericGroupCounter numericGroupCounter,
             ChatMessageRateLimiter rateLimiter
     ) {
         this.entityManager = entityManager;
@@ -71,6 +74,7 @@ public class RentalChatMessageService {
         this.threadRepository = threadRepository;
         this.messageRepository = messageRepository;
         this.maskingService = maskingService;
+        this.numericGroupCounter = numericGroupCounter;
         this.rateLimiter = rateLimiter;
     }
 
@@ -90,7 +94,6 @@ public class RentalChatMessageService {
         }
 
         validateRequest(request);
-        rateLimiter.requirePermission(authenticatedUserId);
         requireActiveSenderWithLock(authenticatedUserId);
 
         RentalChatThread thread = threadRepository
@@ -117,19 +120,6 @@ public class RentalChatMessageService {
             throw conflict("Chat thread is closed.");
         }
 
-        ChatContactMaskingService.MaskedMessage masked =
-                maskingService.mask(request.content().strip());
-
-        String safeContent = masked.content().strip();
-
-        if (safeContent.isBlank()
-                || safeContent.length()
-                > RentalChatMessage.MAX_BODY_LENGTH) {
-            throw badRequest(
-                    "Message is empty or too long after contact masking."
-            );
-        }
-
         var existing = messageRepository
                 .findBySenderIdAndClientMessageId(
                         authenticatedUserId,
@@ -138,16 +128,39 @@ public class RentalChatMessageService {
 
         if (existing.isPresent()) {
             RentalChatMessage message = existing.get();
+            String originalContent = request.content().strip();
+            ChatContactMaskingService.MaskedMessage ordinary =
+                    maskingService.maskChat(originalContent, false);
+            ChatContactMaskingService.MaskedMessage threshold =
+                    maskingService.maskChat(originalContent, true);
+            boolean sameOrdinary = message.getMaskedBody().equals(ordinary.content().strip())
+                    && message.isFlagged() == ordinary.contactMasked();
+            boolean sameThreshold = message.getMaskedBody().equals(threshold.content().strip())
+                    && message.isFlagged() == threshold.contactMasked();
 
             if (!message.getChatThreadId().equals(thread.getId())
-                    || !message.getMaskedBody().equals(safeContent)
-                    || message.isFlagged() != masked.contactMasked()) {
+                    || (!sameOrdinary && !sameThreshold)) {
                 throw conflict(
                         "Client message ID has already been used."
                 );
             }
 
             return result(message, thread, false);
+        }
+
+        rateLimiter.requirePermission(authenticatedUserId);
+
+        String originalContent = request.content().strip();
+        boolean overLimit = numericGroupCounter.exceedsLimit(
+                true, thread.getId(), authenticatedUserId,
+                maskingService.countNumericGroups(originalContent));
+        ChatContactMaskingService.MaskedMessage masked =
+                maskingService.maskChat(originalContent, overLimit);
+        String safeContent = masked.content().strip();
+
+        if (safeContent.isBlank()
+                || safeContent.length() > RentalChatMessage.MAX_BODY_LENGTH) {
+            throw badRequest("Message is empty or too long after contact masking.");
         }
 
         RentalChatMessage message = masked.contactMasked()
@@ -442,7 +455,8 @@ public class RentalChatMessageService {
                 message.getClientMessageId(),
                 message.getMaskedBody(),
                 message.isFlagged(),
-                message.getCreatedAt()
+                message.getCreatedAt(),
+                message.getDeliveredAt()
         );
     }
 
@@ -460,6 +474,26 @@ public class RentalChatMessageService {
                 thread.getLandlordId(),
                 newlyCreated
         );
+    }
+
+    @Transactional
+    public List<SentMessage> acknowledge(UUID recipient, AcknowledgeChatMessagesRequest request) {
+        if (request == null) throw badRequest("Invalid delivery acknowledgement.");
+        var ids = request.validatedIds();
+        if (recipient == null) throw accountUnavailable();
+        rateLimiter.requireDeliveryPermission(recipient);
+        requireActiveSenderWithLock(recipient);
+        var thread = threadRepository.findById(request.threadId()).orElseThrow(RentalChatMessageService::threadNotFound);
+        requireVerifiedRole(recipient, requireParticipant(recipient, thread));
+        Instant now = Instant.now();
+        // ponytail: bounded batches lock at most 100 rows; bulk updates only if measured load warrants them.
+        return ids.stream().map(id -> {
+            var message = messageRepository.lockIncoming(id, thread.getId(), recipient)
+                    .orElseThrow(RentalChatMessageService::threadNotFound);
+            message.confirmDelivery(now);
+            // Retry-shaped publication sends this updated, masked response only to its original sender.
+            return result(message, thread, false);
+        }).toList();
     }
 
     private static ResponseStatusException badRequest(String reason) {

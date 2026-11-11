@@ -46,6 +46,9 @@ public class PaymentIntent {
     @Column(name = "booking_id", updatable = false)
     private UUID bookingId;
 
+    @Column(name = "offer_code", length = 20, updatable = false)
+    private String offerCode;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "target_kind", nullable = false, length = 24, updatable = false)
     private PaymentTargetKind targetKind;
@@ -103,6 +106,15 @@ public class PaymentIntent {
             String currency,
             String idempotencyKey
     ) {
+        this(payerUserId, paymentType, listingId, bookingId, targetKind,
+                amountMinor, currency, idempotencyKey, null);
+    }
+
+    public PaymentIntent(
+            UUID payerUserId, PaymentType paymentType, UUID listingId, UUID bookingId,
+            PaymentTargetKind targetKind, long amountMinor, String currency,
+            String idempotencyKey, String offerCode
+    ) {
         this.payerUserId = Objects.requireNonNull(
                 payerUserId,
                 "Payer user ID is required."
@@ -120,6 +132,7 @@ public class PaymentIntent {
         this.amountMinor = requirePositiveAmount(amountMinor);
         this.currency = normalizeCurrency(currency);
         this.idempotencyKey = normalizeIdempotencyKey(idempotencyKey);
+        this.offerCode = offerCode;
         validateTarget();
     }
 
@@ -288,6 +301,8 @@ public class PaymentIntent {
     public UUID getBookingId() {
         return bookingId;
     }
+
+    public String getOfferCode() { return offerCode; }
 
     public PaymentTargetKind getTargetKind() {
         return targetKind;

@@ -1,5 +1,7 @@
 # Sublessor workspace backend contracts
 
+> Current security note (5 November 2026): ClamAV was removed at the owner's request. Agreement PDFs and ID images are **not malware-scanned**; structural/format validation and ID OCR remain. Earlier references to ClamAV below are historical.
+
 ## 22 October 2026 screen-set reconciliation
 
 The latest twelve Sublessor frames are supported by the contracts below plus the later V58 staff-moderation contracts. `ModerationSubmissionController` exposes owned submit/revise actions for Sublessor listings; `AdminWorkflowService.ownerListingReview` returns the owned review state; V58 prevents database publication unless the saved moderation state is `APPROVED` and invalidates approval when listing, media, location, or shared-home details change. These checks keep the preview, rejected, approved, publish, pause, and resume screens server-authoritative.

@@ -23,6 +23,7 @@ public class AuthOtpChallenge {
     @Column(name = "attempt_count", nullable = false) private int attemptCount;
     @Column(name = "code_digest", length = 64) private String codeDigest;
     @Column(name = "verified_at") private Instant verifiedAt;
+    @Column(name = "pending_google_subject", length = 255, updatable = false) private String pendingGoogleSubject;
     protected AuthOtpChallenge() { }
     public AuthOtpChallenge(User user, AuthOtpChallengePurpose purpose, long authorizationVersion, Instant issuedAt, Instant expiresAt) {
         this.id = UUID.randomUUID(); this.user = Objects.requireNonNull(user); this.purpose = Objects.requireNonNull(purpose);
@@ -35,6 +36,15 @@ public class AuthOtpChallenge {
             throw new IllegalArgumentException("Invalid OTP digest assignment.");
         }
         codeDigest = digest;
+    }
+    public void bindGoogleSubject(String subject) {
+        if (purpose != AuthOtpChallengePurpose.LOGIN && purpose != AuthOtpChallengePurpose.REACTIVATION
+                || status != AuthOtpChallengeStatus.PENDING
+                || codeDigest != null || pendingGoogleSubject != null
+                || subject == null || subject.isBlank() || subject.length() > 255) {
+            throw new IllegalArgumentException("Invalid Google challenge binding.");
+        }
+        pendingGoogleSubject = subject;
     }
     public boolean isUsable(Instant now) { return codeDigest != null && status == AuthOtpChallengeStatus.PENDING && expiresAt.isAfter(now) && attemptCount < MAX_ATTEMPTS; }
     public void recordFailedAttempt(Instant now) {
@@ -56,4 +66,5 @@ public class AuthOtpChallenge {
     public int getAttemptCount() { return attemptCount; }
     public String getCodeDigest() { return codeDigest; }
     public Instant getVerifiedAt() { return verifiedAt; }
+    public String getPendingGoogleSubject() { return pendingGoogleSubject; }
 }

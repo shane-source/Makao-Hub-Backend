@@ -51,6 +51,13 @@ public class ProfileController {
         );
     }
 
+    @PostMapping("/me/phone/complete")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void completeMissingPhone(@AuthenticationPrincipal Jwt jwt,
+                                     @Valid @RequestBody CompletePhoneRequest request) {
+        profileService.completeMissingPhone(extractUserId(jwt), request.phoneNumber());
+    }
+
     @PostMapping("/me/avatar/upload-url")
     public AvatarUploadUrlResponse createAvatarUploadUrl(
             @AuthenticationPrincipal Jwt jwt,
@@ -60,6 +67,13 @@ public class ProfileController {
                 extractUserId(jwt),
                 request.contentType()
         );
+    }
+
+    /** Lets upgraded clients avoid sending photos to older servers lacking validation. */
+    @GetMapping("/me/avatar/capabilities")
+    public java.util.Map<String, String> avatarCapabilities(@AuthenticationPrincipal Jwt jwt) {
+        extractUserId(jwt);
+        return java.util.Map.of("validation", "normalized-jpeg-png-v1");
     }
 
     @PostMapping("/me/avatar/confirm")

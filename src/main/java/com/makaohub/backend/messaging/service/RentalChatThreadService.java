@@ -26,6 +26,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.UUID;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class RentalChatThreadService {
@@ -45,6 +49,7 @@ public class RentalChatThreadService {
     private final RentalApplicationRepository applicationRepository;
     private final ListingRepository listingRepository;
     private final RentalChatThreadRepository threadRepository;
+    private final ChatInboxMetadataService inboxMetadata;
 
     public RentalChatThreadService(
             UserRepository userRepository,
@@ -52,7 +57,8 @@ public class RentalChatThreadService {
             RoleVerificationRepository verificationRepository,
             RentalApplicationRepository applicationRepository,
             ListingRepository listingRepository,
-            RentalChatThreadRepository threadRepository
+            RentalChatThreadRepository threadRepository,
+            ChatInboxMetadataService inboxMetadata
     ) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
@@ -60,6 +66,7 @@ public class RentalChatThreadService {
         this.applicationRepository = applicationRepository;
         this.listingRepository = listingRepository;
         this.threadRepository = threadRepository;
+        this.inboxMetadata = inboxMetadata;
     }
 
     /**
@@ -160,12 +167,14 @@ public class RentalChatThreadService {
 
         Pageable pageable = threadPage(page, size);
 
-        return threadRepository
+        Page<RentalChatThread> threads = threadRepository
                 .findAllByRenterIdOrderByCreatedAtDesc(
                         renterId,
                         pageable
-                )
-                .map(this::toResponse);
+                );
+        Map<UUID, String> participantNames = participantNames(threads.getContent());
+        var metadata = inboxMetadata.forThreads(renterId, ChatInboxMetadataService.Kind.RENTAL, threads.getContent().stream().map(RentalChatThread::getId).toList());
+        return threads.map(thread -> toResponse(thread, participantNames, metadata.get(thread.getId())));
     }
 
     /**
@@ -184,7 +193,7 @@ public class RentalChatThreadService {
                         RentalChatThreadService::threadNotFound
                 );
 
-        return toResponse(thread);
+        return toResponse(thread, participantNames(List.of(thread)), inboxMetadata.forThreads(renterId, ChatInboxMetadataService.Kind.RENTAL, List.of(thread.getId())).get(thread.getId()));
     }
 
     /**
@@ -200,12 +209,14 @@ public class RentalChatThreadService {
 
         Pageable pageable = threadPage(page, size);
 
-        return threadRepository
+        Page<RentalChatThread> threads = threadRepository
                 .findAllByLandlordIdOrderByCreatedAtDesc(
                         landlordId,
                         pageable
-                )
-                .map(this::toResponse);
+                );
+        Map<UUID, String> participantNames = participantNames(threads.getContent());
+        var metadata = inboxMetadata.forThreads(landlordId, ChatInboxMetadataService.Kind.RENTAL, threads.getContent().stream().map(RentalChatThread::getId).toList());
+        return threads.map(thread -> toResponse(thread, participantNames, metadata.get(thread.getId())));
     }
 
     /**
@@ -224,7 +235,7 @@ public class RentalChatThreadService {
                         RentalChatThreadService::threadNotFound
                 );
 
-        return toResponse(thread);
+        return toResponse(thread, participantNames(List.of(thread)), inboxMetadata.forThreads(landlordId, ChatInboxMetadataService.Kind.RENTAL, List.of(thread.getId())).get(thread.getId()));
     }
 
     /**
@@ -299,7 +310,9 @@ public class RentalChatThreadService {
      * This mapper is called only after access checks.
      */
     private RentalChatThreadResponse toResponse(
-            RentalChatThread thread
+            RentalChatThread thread,
+            Map<UUID, String> participantNames,
+            ChatInboxMetadataService.Summary summary
     ) {
         return new RentalChatThreadResponse(
                 thread.getId(),
@@ -307,8 +320,30 @@ public class RentalChatThreadService {
                 thread.getStatus(),
                 thread.getCreatedAt(),
                 thread.getUpdatedAt(),
-                thread.getClosedAt()
+                thread.getClosedAt(),
+                participantName(participantNames, thread.getRenterId()),
+                participantName(participantNames, thread.getLandlordId()),
+                summary == null ? null : summary.name(), summary == null ? null : summary.avatarUrl(),
+                summary == null ? null : summary.lastMessage(), summary == null ? null : summary.lastMessageAt()
         );
+    }
+
+    /** Names are returned only by participant-owned thread queries; contact data stays private. */
+    private Map<UUID, String> participantNames(List<RentalChatThread> threads) {
+        List<UUID> participantIds = threads.stream()
+                .flatMap(thread -> Stream.of(thread.getRenterId(), thread.getLandlordId()))
+                .distinct()
+                .toList();
+        return userRepository.findAllById(participantIds).stream()
+                .collect(Collectors.toMap(User::getId, User::getFullName));
+    }
+
+    private static String participantName(Map<UUID, String> names, UUID participantId) {
+        String name = names.get(participantId);
+        if (name == null) {
+            throw threadNotFound();
+        }
+        return name;
     }
 
     private static ResponseStatusException applicationNotFound() {

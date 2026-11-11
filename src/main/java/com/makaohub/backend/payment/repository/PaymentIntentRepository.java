@@ -1,6 +1,7 @@
 package com.makaohub.backend.payment.repository;
 
 import com.makaohub.backend.payment.domain.PaymentIntent;
+import com.makaohub.backend.payment.domain.PaymentType;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -70,7 +71,16 @@ public interface PaymentIntentRepository
             UUID bookingId
     );
 
+    Optional<PaymentIntent> findFirstByPayerUserIdAndBookingIdAndPaymentTypeOrderByCreatedAtDesc(
+            UUID payerUserId, UUID bookingId, PaymentType paymentType
+    );
+
     Optional<PaymentIntent> findFirstByBookingIdAndPaymentTypeAndStatusOrderByCreatedAtDesc(
+            UUID bookingId,
+            com.makaohub.backend.payment.domain.PaymentType paymentType,
+            com.makaohub.backend.payment.domain.PaymentStatus status
+    );
+    boolean existsByBookingIdAndPaymentTypeAndStatus(
             UUID bookingId,
             com.makaohub.backend.payment.domain.PaymentType paymentType,
             com.makaohub.backend.payment.domain.PaymentStatus status

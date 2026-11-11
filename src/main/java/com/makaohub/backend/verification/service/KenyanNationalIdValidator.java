@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.InvalidPathException;
 import java.util.Locale;
+import java.util.regex.Matcher;
 import java.util.concurrent.*;
 import java.util.regex.Pattern;
 
@@ -29,6 +30,8 @@ public class KenyanNationalIdValidator {
     private static final int MAX_OCR_BYTES = 262_144;
     private static final double MIN_WORD_CONFIDENCE = 35;
     private static final Pattern NUMBER = Pattern.compile("\\b[0-9]+\\b");
+    private static final Pattern MRZ_NAME = Pattern.compile("(?<![A-Z])([A-Z]{2,})<<([A-Z]{2,}(?:<[A-Z]{2,})*)");
+    private static final Pattern LEGACY_MRZ_NAME = Pattern.compile("(?<![A-Z<])([A-Z]{2,}(?:<[A-Z]{2,}){1,5})<{2,}");
     private final String executable;
     private final long timeoutMillis;
     private final Semaphore capacity = new Semaphore(2);
@@ -56,8 +59,140 @@ public class KenyanNationalIdValidator {
             if (failure.getStatusCode() != HttpStatus.BAD_REQUEST) throw failure;
         }
         if (type == VerificationDocumentType.ID_FRONT && matchesEnhancedFront(preparedImage, type)) return;
-        if (matchesRotatedPortrait(preparedImage, type)) return;
+        if (matchesRotated(preparedImage, type)) return;
         throw invalid();
+    }
+
+    /** Compare the printed front name with the structured name on a machine-readable back. */
+    public void assertMatchingNames(byte[] frontImage, byte[] backImage) {
+        if (frontImage == null || backImage == null) throw invalidName();
+        String backText = readText(backImage, 11);
+        Matcher name = mrzName(backText);
+        if (name == null) {
+            backText += " " + readText(backImage, 6);
+            name = mrzName(backText);
+        }
+        if (name == null) {
+            backText += " " + rotatedText(backImage);
+            name = mrzName(backText);
+        }
+        if (name == null) {
+            // Older Kenyan backs have no name to compare; staff still review both sides.
+            String normalized = normalize(backText);
+            if (!normalized.contains("IDKEN") && !normalized.contains("IDKYA")
+                    && isLegacyBack(normalized)) return;
+            if (normalized.contains("IDKYA") && matchesLegacyNames(frontImage, backImage)) return;
+            throw invalidName();
+        }
+        String frontText = readText(frontImage, 11);
+        if (sameName(frontText, name)) return;
+        frontText += " " + readText(frontImage, 6);
+        if (sameName(frontText, name)) return;
+        frontText += " " + rotatedText(frontImage);
+        if (sameName(frontText, name)) return;
+        byte[] enhanced = enhanceForOcr(frontImage);
+        if (enhanced != null) {
+            try {
+                frontText += " " + readText(enhanced, 11);
+                if (sameName(frontText, name)) return;
+                if (sameName(frontText + " " + readText(enhanced, 6), name)) return;
+            } finally { java.util.Arrays.fill(enhanced, (byte) 0); }
+        }
+        throw invalidName();
+    }
+
+    private static Matcher mrzName(String text) {
+        Matcher name = MRZ_NAME.matcher(normalize(text).replaceAll("\\s*<\\s*", "<"));
+        return name.find() ? name : null;
+    }
+
+    static boolean sameName(String frontText, String backText) {
+        Matcher name = mrzName(backText);
+        return name != null && sameName(frontText, name);
+    }
+
+    /** A single-separated older name line must match the entire printed name in order. */
+    static boolean sameLegacyName(String frontText, String backText) {
+        String front = normalize(frontText);
+        Matcher names = LEGACY_MRZ_NAME.matcher(normalize(backText).replaceAll("\\s*<\\s*", "<"));
+        while (names.find()) if (has(front, names.group(1).replace('<', ' '))) return true;
+        return false;
+    }
+
+    /** Recover a small IDKYA name line without changing the comparison or storing OCR output. */
+    private boolean matchesLegacyNames(byte[] frontImage, byte[] backImage) {
+        String frontText = readText(frontImage, 11) + " " + readText(frontImage, 6);
+        StringBuilder nameLines = new StringBuilder();
+        BufferedImage source;
+        try { source = ImageIO.read(new ByteArrayInputStream(backImage)); }
+        catch (IOException failure) { throw invalidName(); }
+        if (source == null) throw invalidName();
+        try {
+            for (int turns = 0; turns < 4; turns++) {
+                byte[] rotated = turns == 0 ? null : rotate(source, turns);
+                BufferedImage current = source;
+                try {
+                    if (rotated != null) current = ImageIO.read(new ByteArrayInputStream(rotated));
+                    if (current == null || current.getHeight() < 2) continue;
+                    var bottom = current.getSubimage(0, current.getHeight() / 2, current.getWidth(), current.getHeight() - current.getHeight() / 2);
+                    var output = new ByteArrayOutputStream();
+                    if (!ImageIO.write(bottom, "PNG", output)) throw unavailable();
+                    byte[] cropped = output.toByteArray();
+                    try {
+                        byte[] enhanced = enhanceForOcr(cropped);
+                        if (enhanced != null) {
+                            try {
+                                String candidate = readText(enhanced, 6);
+                                if (sameLegacyName(frontText, candidate)) return true;
+                                nameLines.append(' ').append(candidate);
+                            }
+                            finally { java.util.Arrays.fill(enhanced, (byte) 0); }
+                        }
+                    } finally { java.util.Arrays.fill(cropped, (byte) 0); }
+                } catch (IOException failure) { throw invalidName(); }
+                finally {
+                    if (current != source && current != null) current.flush();
+                    if (rotated != null) java.util.Arrays.fill(rotated, (byte) 0);
+                }
+            }
+            return sameLegacyName(frontText + " " + rotatedText(frontImage), nameLines.toString());
+        } finally { source.flush(); }
+    }
+
+    private static boolean sameName(String frontText, Matcher name) {
+        String front = normalize(frontText);
+        if (!has(front, name.group(1))) return false;
+        for (String given : name.group(2).split("<")) if (!has(front, given)) return false;
+        return true;
+    }
+
+    private static String normalize(String text) {
+        return text.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9<]+", " ").trim();
+    }
+
+    private String rotatedText(byte[] image) {
+        BufferedImage source;
+        try { source = ImageIO.read(new ByteArrayInputStream(image)); }
+        catch (IOException failure) { throw invalidName(); }
+        if (source == null) throw invalidName();
+        try {
+            StringBuilder text = new StringBuilder();
+            for (int turns = 1; turns <= 3; turns++) {
+                byte[] rotated = rotate(source, turns);
+                try {
+                    text.append(' ').append(readText(rotated, 11));
+                    byte[] enhanced = enhanceForOcr(rotated);
+                    if (enhanced != null) {
+                        try {
+                            text.append(' ').append(readText(enhanced, 11));
+                            text.append(' ').append(readText(enhanced, 6));
+                        } finally { java.util.Arrays.fill(enhanced, (byte) 0); }
+                    }
+                }
+                finally { java.util.Arrays.fill(rotated, (byte) 0); }
+            }
+            return text.toString();
+        } finally { source.flush(); }
     }
 
     private void validateCurrentOrientation(byte[] preparedImage, VerificationDocumentType type) {
@@ -72,23 +207,21 @@ public class KenyanNationalIdValidator {
         }
     }
 
-    /** Phone galleries sometimes store a sideways card without useful EXIF orientation. */
-    private boolean matchesRotatedPortrait(byte[] preparedImage, VerificationDocumentType type) {
+    /** Try right-angle rotations regardless of image dimensions; keep the same OCR field checks. */
+    private boolean matchesRotated(byte[] preparedImage, VerificationDocumentType type) {
         BufferedImage source;
         try { source = ImageIO.read(new ByteArrayInputStream(preparedImage)); }
         catch (IOException failure) { return false; }
-        if (source == null || source.getHeight() <= source.getWidth()) {
-            if (source != null) source.flush();
-            return false;
-        }
+        if (source == null) return false;
         try {
-            for (boolean clockwise : new boolean[] {false, true}) {
-                byte[] rotated = rotate(source, clockwise);
+            for (int turns = 1; turns <= 3; turns++) {
+                byte[] rotated = rotate(source, turns);
                 try {
-                    validateText(readText(rotated, 11), type);
+                    validateCurrentOrientation(rotated, type);
                     return true;
                 } catch (ResponseStatusException failure) {
                     if (failure.getStatusCode() != HttpStatus.BAD_REQUEST) throw failure;
+                    if (type == VerificationDocumentType.ID_FRONT && matchesEnhancedFront(rotated, type)) return true;
                 } finally { java.util.Arrays.fill(rotated, (byte) 0); }
             }
             return false;
@@ -163,15 +296,20 @@ public class KenyanNationalIdValidator {
         }
     }
 
-    private static byte[] rotate(BufferedImage source, boolean clockwise) {
-        var rotated = new BufferedImage(source.getHeight(), source.getWidth(), BufferedImage.TYPE_INT_RGB);
+    private static byte[] rotate(BufferedImage source, int turns) {
+        boolean quarterTurn = turns != 2;
+        var rotated = new BufferedImage(quarterTurn ? source.getHeight() : source.getWidth(),
+                quarterTurn ? source.getWidth() : source.getHeight(), BufferedImage.TYPE_INT_RGB);
         var graphics = rotated.createGraphics();
         try {
             graphics.setColor(Color.WHITE);
             graphics.fillRect(0, 0, rotated.getWidth(), rotated.getHeight());
-            if (clockwise) {
+            if (turns == 1) {
                 graphics.translate(source.getHeight(), 0);
                 graphics.rotate(Math.PI / 2);
+            } else if (turns == 2) {
+                graphics.translate(source.getWidth(), source.getHeight());
+                graphics.rotate(Math.PI);
             } else {
                 graphics.translate(0, source.getWidth());
                 graphics.rotate(-Math.PI / 2);
@@ -281,15 +419,19 @@ public class KenyanNationalIdValidator {
         boolean front = kenya && NUMBER.matcher(text).find()
                 && (legacyFront || maishaFront || nationalIdentityCardFront);
 
-        boolean legacyBack = hasAny(text, "DISTRICT", "DISTRICT OF BIRTH")
-                && has(text, "DIVISION")
-                && has(text.replace("SUB LOCATION", ""), "LOCATION")
-                && has(text, "SUB LOCATION")
-                && hasAny(text, "PLACE OF ISSUE", "DATE OF ISSUE", "PRINCIPAL REGISTRAR");
+        boolean legacyBack = isLegacyBack(text);
         boolean machineReadableBack = (text.contains("IDKYA") || text.contains("IDKEN"))
                 && text.chars().filter(character -> character == '<').count() >= 4;
         boolean back = legacyBack || machineReadableBack;
         if (type == VerificationDocumentType.ID_FRONT ? !front : !back) throw invalid();
+    }
+
+    private static boolean isLegacyBack(String text) {
+        return hasAny(text, "DISTRICT", "DISTRICT OF BIRTH")
+                && has(text, "DIVISION")
+                && has(text.replace("SUB LOCATION", ""), "LOCATION")
+                && has(text, "SUB LOCATION")
+                && hasAny(text, "PLACE OF ISSUE", "DATE OF ISSUE", "PRINCIPAL REGISTRAR");
     }
 
     private static boolean hasAny(String text, String... phrases) {
@@ -337,6 +479,11 @@ public class KenyanNationalIdValidator {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST,
                 "The image could not be recognized as the requested side of a Kenyan national ID. "
                         + "Upload a clear, upright photo with all edges and printed details visible.");
+    }
+
+    private static ResponseStatusException invalidName() {
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "The names on the front and back of the ID could not be matched. Upload clear images of both sides of the same card.");
     }
 
     private static ResponseStatusException unavailable() {

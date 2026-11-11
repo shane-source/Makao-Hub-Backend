@@ -79,7 +79,8 @@ public class PasswordAuthenticationService {
 
         User user = userCandidate.get();
 
-        if (user.getAccountStatus() != AccountStatus.ACTIVE) {
+        if (user.getAccountStatus() != AccountStatus.ACTIVE
+                && user.getAccountStatus() != AccountStatus.DEACTIVATED) {
             throw new AuthException(
                     AuthException.Reason.ACCOUNT_UNAVAILABLE,
                     "This account is unavailable."
@@ -88,7 +89,9 @@ public class PasswordAuthenticationService {
 
         // The selection must match the stored role. It must never replace that role.
         // This runs after password validation, before an OTP or tokens can be issued.
-        roleSelectionService.resolveForLogin(user, request.expectedRole());
+        if (user.getAccountStatus() == AccountStatus.DEACTIVATED)
+            roleSelectionService.resolveForReactivation(user, request.expectedRole());
+        else roleSelectionService.resolveForLogin(user, request.expectedRole());
 
         /*
          * AuthenticationTokenService reads the user's stored role from

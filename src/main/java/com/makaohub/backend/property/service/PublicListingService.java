@@ -12,6 +12,7 @@ import com.makaohub.backend.property.repository.ListingLocationRepository;
 import com.makaohub.backend.property.repository.ListingMediaRepository;
 import com.makaohub.backend.property.repository.ListingRepository;
 import com.makaohub.backend.storage.service.SupabaseStorageClient;
+import com.makaohub.backend.payment.service.LandlordOfferService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -38,17 +39,20 @@ public class PublicListingService {
     private final ListingLocationRepository locationRepository;
     private final ListingMediaRepository mediaRepository;
     private final SupabaseStorageClient storageClient;
+    private final LandlordOfferService offers;
 
     public PublicListingService(
             ListingRepository listingRepository,
             ListingLocationRepository locationRepository,
             ListingMediaRepository mediaRepository,
-            SupabaseStorageClient storageClient
+            SupabaseStorageClient storageClient,
+            LandlordOfferService offers
     ) {
         this.listingRepository = listingRepository;
         this.locationRepository = locationRepository;
         this.mediaRepository = mediaRepository;
         this.storageClient = storageClient;
+        this.offers = offers;
     }
 
     @Transactional(readOnly = true)
@@ -151,14 +155,7 @@ public class PublicListingService {
                 MAX_PAGE_SIZE
         );
 
-        Pageable pageable = PageRequest.of(
-                safePage,
-                safeSize,
-                Sort.by(
-                        Sort.Direction.DESC,
-                        "updatedAt"
-                )
-        );
+        Pageable pageable = PageRequest.of(safePage, safeSize);
 
         boolean noFilters = minRentKes == null
                 && maxRentKes == null
@@ -168,15 +165,11 @@ public class PublicListingService {
                 && normalizedAreaLabel == null;
 
         Page<Listing> listingPage = noFilters
-                ? listingRepository.findAllByStatus(
-                ListingStatus.PUBLISHED,
-                pageable
-        )
+                ? listingRepository.findPublishedSponsoredFirst(pageable)
                 : listingRepository.searchListings(
-                ListingStatus.PUBLISHED,
                 minRentKes,
                 maxRentKes,
-                propertyType,
+                propertyType == null ? null : propertyType.name(),
                 minBedrooms,
                 furnished,
                 normalizedAreaLabel,
@@ -347,7 +340,8 @@ public class PublicListingService {
                 location.getApproximateLatitude(),
                 location.getApproximateLongitude(),
                 location.getApproximateRadiusMeters(),
-                listing.getUpdatedAt()
+                listing.getUpdatedAt(),
+                offers.isBoosted(listing.getId())
         );
     }
 

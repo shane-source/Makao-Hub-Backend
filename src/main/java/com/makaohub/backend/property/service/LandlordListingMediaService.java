@@ -8,6 +8,7 @@ import com.makaohub.backend.auth.repository.UserRoleRepository;
 import com.makaohub.backend.property.api.CreateListingMediaUploadRequest;
 import com.makaohub.backend.property.api.ListingMediaResponse;
 import com.makaohub.backend.property.api.ListingMediaUploadResponse;
+import com.makaohub.backend.property.api.PublicListingMediaResponse;
 import com.makaohub.backend.property.domain.Listing;
 import com.makaohub.backend.property.domain.ListingMedia;
 import com.makaohub.backend.property.domain.ListingMediaType;
@@ -196,6 +197,32 @@ public class LandlordListingMediaService {
                 .findAllByListingIdOrderBySortOrderAsc(listingId)
                 .stream()
                 .map(this::toResponse)
+                .toList();
+    }
+
+    public List<PublicListingMediaResponse> findPhotosForOwner(
+            UUID landlordId,
+            UUID listingId
+    ) {
+        requireActiveLandlord(landlordId);
+
+        listingRepository.findByIdAndLandlordId(listingId, landlordId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Listing not found."
+                ));
+
+        return mediaRepository
+                .findAllByListingIdAndConfirmedAtIsNotNullOrderBySortOrderAsc(listingId)
+                .stream()
+                .filter(media -> media.getMediaType() == ListingMediaType.IMAGE)
+                .map(media -> new PublicListingMediaResponse(
+                        media.getId(),
+                        media.getMediaType(),
+                        media.getContentType(),
+                        media.getSortOrder(),
+                        storageClient.createSignedListingMediaReadUrl(media.getObjectPath())
+                ))
                 .toList();
     }
 

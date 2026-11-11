@@ -9,8 +9,8 @@ public record AvatarUploadUrlRequest(
 
         @NotBlank(message = "Content type is required.")
         @Pattern(
-                regexp = "image/(jpeg|png|webp)",
-                message = "Avatar must be a JPEG, PNG, or WebP image."
+                regexp = "image/(jpeg|png)",
+                message = "Avatar must be a JPEG or PNG image."
         )
         String contentType
 ) {

@@ -4,21 +4,17 @@ import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.encryption.*;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import java.io.ByteArrayOutputStream;
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 class OwnershipPdfValidatorTest {
-    private final ClamAvScanner scanner = mock(ClamAvScanner.class);
-    private final OwnershipPdfValidator validator = new OwnershipPdfValidator(scanner);
+    private final OwnershipPdfValidator validator = new OwnershipPdfValidator();
 
-    @Test void staticPdfIsScannedAndAcceptedWithoutChangingIt() throws Exception {
+    @Test void staticPdfIsAcceptedWithoutChangingIt() throws Exception {
         byte[] pdf = pdf(null, false);
         byte[] original = pdf.clone();
         assertDoesNotThrow(() -> validator.validate(pdf));
-        verify(scanner).assertClean(pdf);
         assertArrayEquals(original, pdf);
     }
 
@@ -40,12 +36,6 @@ class OwnershipPdfValidatorTest {
             pdf.getDocumentCatalog().getCOSObject().setItem(COSName.getPDFName("Action"), action);
             var bytes = new ByteArrayOutputStream(); pdf.save(bytes); assertRejected(bytes.toByteArray());
         }
-    }
-
-    @Test void scannerOutageNeverBecomesPdfApproval() throws Exception {
-        byte[] pdf = pdf(null, false);
-        doThrow(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE)).when(scanner).assertClean(pdf);
-        assertEquals(503, assertThrows(ResponseStatusException.class, () -> validator.validate(pdf)).getStatusCode().value());
     }
 
     private void assertRejected(byte[] pdf) {

@@ -65,8 +65,19 @@ public class Booking {
     @Column(name = "move_in_confirmed_at")
     private Instant moveInConfirmedAt;
 
+    @Column(name = "owner_move_in_confirmed_at")
+    private Instant ownerMoveInConfirmedAt;
+
+    @Column(name = "move_in_accepted") private Boolean moveInAccepted;
+    @Column(name = "move_in_answered_at") private Instant moveInAnsweredAt;
+    @Column(name = "move_in_response_key", length = 100) private String moveInResponseKey;
+    @Column(name = "test_payout_status", nullable = false, length = 32) private String testPayoutStatus = "NOT_QUEUED";
+
     @Column(name = "release_eligible_at")
     private Instant releaseEligibleAt;
+
+    @Column(name = "owner_release_requested_at")
+    private Instant ownerReleaseRequestedAt;
 
     @Column(name = "released_at")
     private Instant releasedAt;
@@ -175,9 +186,9 @@ public class Booking {
 
     public void activate() {
         requireStatus(BookingStatus.PAID_HELD);
-        if (!bothPartiesAgreed()) {
+        if (!bothPartiesAgreed() || moveInConfirmedAt == null || ownerMoveInConfirmedAt == null) {
             throw new IllegalStateException(
-                    "Both renter and owner must confirm before activation."
+                    "Both renter and owner must confirm move-in before activation."
             );
         }
         status = BookingStatus.ACTIVE;
@@ -197,10 +208,7 @@ public class Booking {
         }
     }
 
-    /**
-     * Records the renter's server-timestamped move-in confirmation and starts
-     * the mandatory 24-hour release waiting period.
-     */
+    /** Records renter move-in; release must still wait for the owner's confirmation. */
     public void confirmMoveIn(Instant confirmedAt) {
         requirePaidHeld();
         if (!bothPartiesAgreed()) {
@@ -213,8 +221,34 @@ public class Booking {
                     confirmedAt, "Move-in confirmation time is required."
             );
             moveInConfirmedAt = confirmed;
-            releaseEligibleAt = confirmed.plus(24, ChronoUnit.HOURS);
         }
+    }
+
+    /** The second confirmation starts the five-minute TEST release wait; retries preserve its deadline. */
+    public boolean confirmOwnerMoveIn(Instant confirmedAt) {
+        requirePaidHeld();
+        if (!bothPartiesAgreed() || moveInConfirmedAt == null) {
+            throw new IllegalStateException("The renter must confirm move-in before the owner can confirm it.");
+        }
+        if (ownerMoveInConfirmedAt != null) return false;
+        Instant confirmed = Objects.requireNonNull(confirmedAt, "Confirmation time is required.");
+        if (confirmed.isBefore(moveInConfirmedAt)) throw new IllegalArgumentException("Owner confirmation predates renter move-in.");
+        ownerMoveInConfirmedAt = confirmed;
+        releaseEligibleAt = confirmed.plus(5, ChronoUnit.MINUTES);
+        return true;
+    }
+
+    /** Records one owner request for staff review, without changing release eligibility. */
+    public boolean requestReleaseReview(Instant requestedAt) {
+        requirePaidHeld();
+        if (!bothPartiesAgreed() || moveInConfirmedAt == null || ownerMoveInConfirmedAt == null) {
+            throw new IllegalStateException("Both renter and owner must confirm move-in before payout review.");
+        }
+        if (ownerReleaseRequestedAt != null) return false;
+        Instant requested = Objects.requireNonNull(requestedAt, "Request time is required.");
+        if (requested.isBefore(moveInConfirmedAt)) throw new IllegalArgumentException("Request predates move-in.");
+        ownerReleaseRequestedAt = requested;
+        return true;
     }
 
     public void markReleased(
@@ -223,22 +257,19 @@ public class Booking {
             String releaseIdempotencyKey
     ) {
         requirePaidHeld();
-        if (!bothPartiesAgreed()) {
+        if (!Boolean.TRUE.equals(moveInAccepted)) throw new IllegalStateException("A fresh renter True response is required.");
+        if (moveInConfirmedAt == null || ownerMoveInConfirmedAt == null || releaseEligibleAt == null) {
             throw new IllegalStateException(
-                "Both renter and owner must confirm before release."
+                    "The owner report and renter True response are required before release."
             );
         }
-        if (moveInConfirmedAt == null || releaseEligibleAt == null) {
+        Instant releaseTime = Objects.requireNonNull(releasedAt, "Release time is required.");
+        if (releaseTime.isBefore(releaseEligibleAt)) {
             throw new IllegalStateException(
-                    "The renter must confirm move-in before release."
+                    "The five-minute wait after the renter's True response has not elapsed."
             );
         }
-        this.releasedAt = Objects.requireNonNull(releasedAt, "Release time is required.");
-        if (this.releasedAt.isBefore(releaseEligibleAt)) {
-            throw new IllegalStateException(
-                    "The 24-hour move-in holding period has not elapsed."
-            );
-        }
+        this.releasedAt = releaseTime;
         this.payoutReference = normalizeReference(payoutReference, "Payout reference");
         this.releaseIdempotencyKey = normalizeIdempotencyKey(releaseIdempotencyKey);
         status = BookingStatus.ACTIVE;
@@ -249,15 +280,44 @@ public class Booking {
     }
 
     public boolean isReleaseEligible(Instant now) {
-        return releaseEligibleAt != null
+        return Boolean.TRUE.equals(moveInAccepted) && ownerMoveInConfirmedAt != null && releaseEligibleAt != null
                 && now != null
                 && !now.isBefore(releaseEligibleAt);
     }
 
+    /** Owner reports first; old timestamps never stand in for the renter's fresh answer. */
+    public boolean reportOwnerMoveIn(Instant now) {
+        requirePaidHeld();
+        if (ownerMoveInConfirmedAt != null) return false;
+        ownerMoveInConfirmedAt = Objects.requireNonNull(now);
+        releaseEligibleAt = null;
+        return true;
+    }
+
+    public boolean respondToOwnerMoveIn(boolean accepted, Instant now, String key) {
+        requirePaidHeld();
+        if (ownerMoveInConfirmedAt == null)
+            throw new IllegalStateException("Wait for the owner to report move-in first.");
+        if (moveInAccepted != null) {
+            if (moveInAccepted == accepted) return false;
+            throw new IllegalStateException("Your response is already recorded. Contact staff for review.");
+        }
+        Instant answer = Objects.requireNonNull(now);
+        if (answer.isBefore(ownerMoveInConfirmedAt)) throw new IllegalArgumentException("Response predates owner report.");
+        String responseKey = normalizeIdempotencyKey(key);
+        moveInAccepted = accepted; moveInAnsweredAt = answer; moveInResponseKey = responseKey;
+        if (accepted) { moveInConfirmedAt = answer; releaseEligibleAt = answer.plus(5, ChronoUnit.MINUTES); }
+        else releaseEligibleAt = null;
+        testPayoutStatus = accepted ? "WAITING" : "REVIEW_REQUIRED";
+        return true;
+    }
+
+    public void setTestPayoutStatus(String value) { testPayoutStatus = Objects.requireNonNull(value); }
+
     private void requirePaidHeld() {
         if (status != BookingStatus.PAID_HELD) {
             throw new IllegalStateException(
-                    "The booking must be paid and held before agreement confirmation."
+                    "The booking payment must be confirmed and held first."
             );
         }
     }
@@ -326,7 +386,12 @@ public class Booking {
     public Instant getRenterAgreedAt() { return renterAgreedAt; }
     public Instant getOwnerAgreedAt() { return ownerAgreedAt; }
     public Instant getMoveInConfirmedAt() { return moveInConfirmedAt; }
+    public Instant getOwnerMoveInConfirmedAt() { return ownerMoveInConfirmedAt; }
+    public Boolean getMoveInAccepted() { return moveInAccepted; }
+    public Instant getMoveInAnsweredAt() { return moveInAnsweredAt; }
+    public String getTestPayoutStatus() { return testPayoutStatus; }
     public Instant getReleaseEligibleAt() { return releaseEligibleAt; }
+    public Instant getOwnerReleaseRequestedAt() { return ownerReleaseRequestedAt; }
     public Instant getReleasedAt() { return releasedAt; }
     public String getPayoutReference() { return payoutReference; }
     public String getReleaseIdempotencyKey() { return releaseIdempotencyKey; }

@@ -7,6 +7,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import jakarta.validation.Valid;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
@@ -33,7 +36,7 @@ public class RenterBookingAgreementController {
         );
     }
 
-    /** Starts the server-controlled 24-hour release timer after move-in. */
+    /** Retired renter-first route; service returns Gone so old clients cannot imply fresh consent. */
     @PostMapping("/{bookingId}/move-in/confirm")
     public BookingResponse confirmMoveIn(
             @AuthenticationPrincipal Jwt jwt,
@@ -42,6 +45,12 @@ public class RenterBookingAgreementController {
         return BookingResponse.from(
                 agreementService.confirmMoveIn(userId(jwt), bookingId)
         );
+    }
+
+    @PostMapping("/{bookingId}/move-in/response")
+    public BookingResponse respondToMoveIn(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID bookingId,
+            @RequestHeader("Idempotency-Key") String key, @Valid @RequestBody MoveInResponseRequest request) {
+        return BookingResponse.from(agreementService.respondToMoveIn(userId(jwt),bookingId,request.accepted(),key));
     }
 
     private static UUID userId(Jwt jwt) {

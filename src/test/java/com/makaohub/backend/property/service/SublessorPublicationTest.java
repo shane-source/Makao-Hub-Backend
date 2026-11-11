@@ -14,6 +14,7 @@ import com.makaohub.backend.property.repository.SublessorListingRepository;
 import com.makaohub.backend.verification.domain.RoleVerification;
 import com.makaohub.backend.verification.domain.VerificationStatus;
 import com.makaohub.backend.verification.repository.RoleVerificationRepository;
+import com.makaohub.backend.payment.service.LandlordOfferService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -49,10 +50,41 @@ class SublessorPublicationTest {
         when(media.existsBySublessorListingIdAndConfirmedAtIsNotNull(listingId)).thenReturn(true);
         when(media.existsBySublessorListingIdAndMediaTypeAndConfirmedAtIsNotNull(listingId, ListingMediaType.IMAGE)).thenReturn(false);
 
-        var service = new SublessorListingService(users, roles, listings, locations, media, verifications);
+        var service = new SublessorListingService(users, roles, listings, locations, media, verifications,
+                mock(LandlordOfferService.class));
         var error = assertThrows(ResponseStatusException.class, () -> service.publish(actor, listingId));
 
         assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
+        verify(listing, never()).publish();
+        verify(listings, never()).save(any());
+    }
+
+    @Test
+    void planLimitBlocksPublicationBeforeTheListingChanges() {
+        UUID actor = UUID.randomUUID(), listingId = UUID.randomUUID();
+        var users = mock(UserRepository.class);
+        var roles = mock(UserRoleRepository.class);
+        var listings = mock(SublessorListingRepository.class);
+        var locations = mock(SublessorListingLocationRepository.class);
+        var media = mock(SublessorListingMediaRepository.class);
+        var verifications = mock(RoleVerificationRepository.class);
+        var offers = mock(LandlordOfferService.class);
+        var user = mock(User.class);
+        var listing = mock(SublessorListing.class);
+        var verification = mock(RoleVerification.class);
+        when(users.findById(actor)).thenReturn(Optional.of(user));
+        when(user.getAccountStatus()).thenReturn(AccountStatus.ACTIVE);
+        when(roles.existsByUser_IdAndRole_Name(actor, RoleName.SUBLESSOR)).thenReturn(true);
+        when(listings.findByIdAndSublessorId(listingId, actor)).thenReturn(Optional.of(listing));
+        when(verifications.findByUserIdAndRole(actor, RoleName.SUBLESSOR)).thenReturn(Optional.of(verification));
+        when(verification.getStatus()).thenReturn(VerificationStatus.VERIFIED);
+        when(locations.findBySublessorListingId(listingId)).thenReturn(Optional.of(mock(SublessorListingLocation.class)));
+        when(media.existsBySublessorListingIdAndMediaTypeAndConfirmedAtIsNotNull(listingId, ListingMediaType.IMAGE)).thenReturn(true);
+        doThrow(new ResponseStatusException(HttpStatus.CONFLICT, "Plan limit reached."))
+                .when(offers).requireSublessorPublicationSlot(actor);
+
+        var service = new SublessorListingService(users, roles, listings, locations, media, verifications, offers);
+        assertThrows(ResponseStatusException.class, () -> service.publish(actor, listingId));
         verify(listing, never()).publish();
         verify(listings, never()).save(any());
     }

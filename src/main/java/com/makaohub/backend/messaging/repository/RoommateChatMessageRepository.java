@@ -14,6 +14,11 @@ import java.util.UUID;
 public interface RoommateChatMessageRepository
         extends JpaRepository<RoommateChatMessage, UUID> {
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT m FROM RoommateChatMessage m WHERE m.id = :id AND m.chatThreadId = :thread AND m.senderId <> :recipient")
+    Optional<RoommateChatMessage> lockIncoming(@Param("id") UUID id, @Param("thread") UUID thread,
+                                              @Param("recipient") UUID recipient);
+
     /**
      * Finds a previously stored message using the sender and the
      * client-generated message ID.

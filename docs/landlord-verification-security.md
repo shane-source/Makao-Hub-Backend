@@ -1,5 +1,7 @@
 # Landlord verification and evidence security
 
+> Current security note (5 November 2026): ClamAV was removed at the owner's request. Image and PDF uploads are **not malware-scanned**. Image decoding/re-encoding, ID OCR, and bounded PDF structural checks remain. The ClamAV description below is historical and must not be used as a production-security claim.
+
 Updated 14 October 2026. This document describes the implemented test-stage flow. It does not certify production identity verification, Kenyan-law compliance, malware detection quality, or a live Supabase/ClamAV deployment.
 
 ## Decided scope and deliberately undecided items

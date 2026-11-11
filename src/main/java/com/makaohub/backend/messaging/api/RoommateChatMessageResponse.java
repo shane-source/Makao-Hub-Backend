@@ -10,6 +10,7 @@ public record RoommateChatMessageResponse(
         UUID clientMessageId,
         String content,
         boolean contactMasked,
-        Instant createdAt
+        Instant createdAt,
+        Instant deliveredAt
 ) {
 }

@@ -144,8 +144,29 @@ public class User {
         return phoneLookupHash;
     }
 
+    /** Initial completion only. Existing contact changes require a separate approved process. */
+    public void completeMissingPhone(byte[] ciphertext, String lookupHash) {
+        if (phoneCiphertext != null || phoneLookupHash != null) {
+            throw new IllegalStateException("Phone is already configured.");
+        }
+        byte[] protectedCopy = Objects.requireNonNull(ciphertext).clone();
+        String requiredHash = Objects.requireNonNull(lookupHash);
+        phoneCiphertext = protectedCopy;
+        phoneLookupHash = requiredHash;
+    }
+
     public AccountStatus getAccountStatus() {
         return accountStatus;
+    }
+
+    /** Only self-deactivated accounts can return through the reactivation OTP path. */
+    public void changeSelfServiceStatus(AccountStatus next) {
+        boolean permitted = accountStatus == AccountStatus.ACTIVE
+                && (next == AccountStatus.DEACTIVATED || next == AccountStatus.DELETION_PENDING)
+                || accountStatus == AccountStatus.DEACTIVATED && next == AccountStatus.ACTIVE;
+        if (!permitted) throw new IllegalStateException("Invalid self-service account transition.");
+        accountStatus = next;
+        invalidateAuthorization();
     }
 
     public boolean isRoleSelectionRequired() {

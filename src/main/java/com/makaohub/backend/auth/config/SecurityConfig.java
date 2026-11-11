@@ -121,6 +121,14 @@ public class SecurityConfig {
                 )
 
                 .authorizeHttpRequests(authorize -> authorize
+                        // Static navigation only: no payment lookup, verification, state change or account data.
+                        .requestMatchers(HttpMethod.GET, "/payments/paystack/return").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/profile/me/phone/complete")
+                        .hasAnyRole("RENTER", "LANDLORD", "SUBLESSOR")
+                        .requestMatchers("/api/v1/profile/me/avatar/**")
+                        .hasAnyRole("RENTER", "LANDLORD", "SUBLESSOR")
+                        .requestMatchers("/api/v1/profile/me/deletion-request", "/api/v1/profile/me/account-action/**")
+                        .hasAnyRole("RENTER", "LANDLORD", "SUBLESSOR")
                         /*
                          * Public operational endpoints.
                          */
@@ -130,6 +138,14 @@ public class SecurityConfig {
                                 "/api/v1/payments/daraja/callback",
                                 "/api/v1/payments/paystack/webhook"
                         ).permitAll()
+
+                        /*
+                         * A WebSocket handshake has no Bearer header: chat
+                         * authenticates the JWT in its STOMP CONNECT frame.
+                         * Permit only this handshake route; the inbound
+                         * interceptors reject unauthenticated chat frames.
+                         */
+                        .requestMatchers(HttpMethod.GET, "/ws").permitAll()
 
                         /*
                          * Public authentication endpoints.
@@ -147,6 +163,7 @@ public class SecurityConfig {
                                 "/api/v1/auth/google/register",
                                 "/api/v1/auth/google",
                                 "/api/v1/auth/login/verify-otp",
+                                "/api/v1/auth/reactivate/verify-otp",
                                 "/api/v1/auth/google/verify-otp",
                                 "/api/v1/auth/forgot-password",
                                 "/api/v1/auth/forgot-password/reset",
@@ -187,7 +204,17 @@ public class SecurityConfig {
                          * The service still performs its own active-account
                          * and ownership/state checks.
                          */
-                        // Financial mutations remain blocked until their rules and approvals are defined.
+                        // Only the test-profile booking release may pass this boundary.
+                        // The controller rechecks payment-reviewer MFA permission and test mode.
+                        .requestMatchers(HttpMethod.POST,"/api/v1/admin/payments/bookings/*/release",
+                                "/api/v1/admin/payments/owners/*/test-recipient")
+                        .access((authentication,context) -> {
+                            var guard=staffAccess.getIfAvailable();
+                            var principal=authentication.get();
+                            return new AuthorizationDecision(guard!=null && principal instanceof JwtAuthenticationToken token
+                                    && guard.allows(token.getToken()));
+                        })
+                        // All other financial mutations remain blocked.
                         .requestMatchers(HttpMethod.POST,"/api/v1/admin/payments/**").denyAll()
                         .requestMatchers("/api/v1/admin/**")
                         .access((authentication,context) -> {

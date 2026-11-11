@@ -18,12 +18,15 @@ import com.makaohub.backend.renter.repository.BookingRepository;
 import com.makaohub.backend.verification.domain.RoleVerification;
 import com.makaohub.backend.verification.domain.VerificationStatus;
 import com.makaohub.backend.verification.repository.RoleVerificationRepository;
+import com.makaohub.backend.notification.service.NotificationService;
+import com.makaohub.backend.notification.domain.NotificationType;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -43,6 +46,7 @@ public class BookingAgreementService {
     private final RoleVerificationRepository verificationRepository;
     private final MockEscrowLedgerService escrowLedgerService;
     private final MockPaymentAuditService auditService;
+    private final NotificationService notifications;
 
     public BookingAgreementService(
             BookingRepository bookingRepository,
@@ -51,7 +55,8 @@ public class BookingAgreementService {
             UserRoleRepository userRoleRepository,
             RoleVerificationRepository verificationRepository,
             MockEscrowLedgerService escrowLedgerService,
-            MockPaymentAuditService auditService
+            MockPaymentAuditService auditService,
+            NotificationService notifications
     ) {
         this.bookingRepository = bookingRepository;
         this.paymentIntentRepository = paymentIntentRepository;
@@ -60,6 +65,7 @@ public class BookingAgreementService {
         this.verificationRepository = verificationRepository;
         this.escrowLedgerService = escrowLedgerService;
         this.auditService = auditService;
+        this.notifications = notifications;
     }
 
     @Transactional
@@ -75,13 +81,15 @@ public class BookingAgreementService {
     }
 
     @Transactional
-    public Booking confirmOwner(UUID ownerId, UUID bookingId) {
+    public Booking confirmOwner(UUID ownerId, UUID bookingId, RoleName role) {
+        if (role != RoleName.LANDLORD && role != RoleName.SUBLESSOR) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        requireActiveRole(ownerId, role);
         Booking booking = bookingRepository.findByIdAndOwnerIdForUpdate(bookingId, ownerId)
                 .orElseThrow(() -> notFound("Booking not found."));
         RoleName ownerRole = booking.getListingKind() == BookingListingKind.LANDLORD_LISTING
                 ? RoleName.LANDLORD
                 : RoleName.SUBLESSOR;
-        requireActiveRole(ownerId, ownerRole);
+        if (role != ownerRole) throw notFound("Booking not found.");
         requireVerified(ownerId, ownerRole);
         PaymentIntent intent = successfulBookingPayment(bookingId);
         booking.confirmOwnerAgreement(Instant.now());
@@ -92,13 +100,89 @@ public class BookingAgreementService {
 
     @Transactional
     public Booking confirmMoveIn(UUID renterId, UUID bookingId) {
+        throw new ResponseStatusException(HttpStatus.GONE, "Respond True or False to the owner's move-in report using the updated app.");
+    }
+
+    /** Owner initiates; no payout deadline starts until the renter answers True. */
+    @Transactional
+    public Booking confirmOwnerMoveIn(UUID ownerId, UUID bookingId, RoleName role, String idempotencyKey) {
+        normalizeKey(idempotencyKey);
+        if (role != RoleName.LANDLORD && role != RoleName.SUBLESSOR) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        requireActiveRole(ownerId, role);
+        Booking booking = bookingRepository.findByIdAndOwnerIdForUpdate(bookingId, ownerId)
+                .orElseThrow(() -> notFound("Booking not found."));
+        RoleName bookingRole = booking.getListingKind() == BookingListingKind.LANDLORD_LISTING
+                ? RoleName.LANDLORD : RoleName.SUBLESSOR;
+        if (role != bookingRole) throw notFound("Booking not found.");
+        requireVerified(ownerId, role);
+        PaymentIntent intent = successfulBookingPayment(bookingId);
+        try {
+            if (booking.reportOwnerMoveIn(Instant.now())) {
+                bookingRepository.save(booking);
+                auditService.recordOwnerMoveInConfirmed(intent, booking);
+            }
+            String ownerName = userRepository.findById(ownerId).orElseThrow().getFullName();
+            notifications.bookingNotice(booking.getRenterId(), bookingId, NotificationType.MOVE_IN_REPORTED,
+                    "Did you move in?", ownerName + " reported that you moved in. Select True only if this is correct; False keeps payment held for staff review.");
+        } catch (IllegalStateException | IllegalArgumentException failure) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, failure.getMessage());
+        }
+        return booking;
+    }
+
+    @Transactional
+    public Booking respondToMoveIn(UUID renterId, UUID bookingId, boolean accepted, String idempotencyKey) {
+        String key = normalizeKey(idempotencyKey);
         requireActiveRole(renterId, RoleName.RENTER);
         Booking booking = bookingRepository.findByIdAndRenterIdForUpdate(bookingId, renterId)
                 .orElseThrow(() -> notFound("Booking not found."));
         PaymentIntent intent = successfulBookingPayment(bookingId);
-        booking.confirmMoveIn(Instant.now());
-        bookingRepository.save(booking);
-        auditService.recordMoveInConfirmed(intent, booking);
+        try {
+            if (booking.respondToOwnerMoveIn(accepted, Instant.now(), key)) {
+                bookingRepository.save(booking);
+                auditService.recordMoveInResponse(intent, booking, accepted);
+                notifications.bookingNotice(booking.getOwnerId(), bookingId, NotificationType.MOVE_IN_RESPONSE,
+                        accepted ? "Renter answered True" : "Move-in needs staff review",
+                        accepted ? "The renter accepted your report. The five-minute TEST payout wait has started."
+                                : "The renter answered False. Payment remains held and requires staff review.");
+            }
+        } catch (IllegalArgumentException | IllegalStateException failure) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, failure.getMessage());
+        }
+        return booking;
+    }
+
+    /** Shows only bookings owned by the account in its active owner role. */
+    @Transactional(readOnly = true)
+    public List<Booking> ownerBookings(UUID ownerId, RoleName role) {
+        if (role != RoleName.LANDLORD && role != RoleName.SUBLESSOR) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        requireActiveRole(ownerId, role);
+        return bookingRepository.findTop50ByOwnerIdAndListingKindOrderByCreatedAtDesc(
+                ownerId, role == RoleName.LANDLORD ? BookingListingKind.LANDLORD_LISTING : BookingListingKind.SUBLESSOR_LISTING
+        );
+    }
+
+    /** An owner signal to staff; it never shortens the five-minute wait after both confirmations or moves funds. */
+    @Transactional
+    public Booking requestOwnerReleaseReview(UUID ownerId, UUID bookingId, RoleName role, String idempotencyKey) {
+        normalizeKey(idempotencyKey);
+        if (role != RoleName.LANDLORD && role != RoleName.SUBLESSOR) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        requireActiveRole(ownerId, role);
+        Booking booking = bookingRepository.findByIdAndOwnerIdForUpdate(bookingId, ownerId)
+                .orElseThrow(() -> notFound("Booking not found."));
+        RoleName bookingRole = booking.getListingKind() == BookingListingKind.LANDLORD_LISTING
+                ? RoleName.LANDLORD : RoleName.SUBLESSOR;
+        if (role != bookingRole) throw notFound("Booking not found.");
+        requireVerified(ownerId, role);
+        PaymentIntent intent = successfulBookingPayment(bookingId);
+        try {
+            if (booking.requestReleaseReview(Instant.now())) {
+                bookingRepository.save(booking);
+                auditService.recordOwnerReleaseReviewRequested(intent, booking);
+            }
+        } catch (IllegalStateException | IllegalArgumentException failure) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, failure.getMessage());
+        }
         return booking;
     }
 
@@ -130,12 +214,6 @@ public class BookingAgreementService {
                     "This booking has already been released with another key."
             );
         }
-        if (!booking.bothPartiesAgreed()) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "Both renter and owner must confirm before release."
-            );
-        }
         RoleName ownerRole = booking.getListingKind() == BookingListingKind.LANDLORD_LISTING
                 ? RoleName.LANDLORD
                 : RoleName.SUBLESSOR;
@@ -144,7 +222,7 @@ public class BookingAgreementService {
         if (!booking.isReleaseEligible(releaseTime)) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
-                    "Release is available 24 hours after the renter confirms move-in."
+                    "The owner must report move-in and the renter must answer True, then wait five minutes."
             );
         }
         PaymentIntent intent = successfulBookingPayment(bookingId);
@@ -156,6 +234,10 @@ public class BookingAgreementService {
     }
 
     private PaymentIntent successfulBookingPayment(UUID bookingId) {
+        if (paymentIntentRepository.existsByBookingIdAndPaymentTypeAndStatus(
+                bookingId, PaymentType.BOOKING, PaymentStatus.DISPUTED)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This booking payment is disputed.");
+        }
         return paymentIntentRepository
                 .findFirstByBookingIdAndPaymentTypeAndStatusOrderByCreatedAtDesc(
                         bookingId, PaymentType.BOOKING, PaymentStatus.SUCCEEDED

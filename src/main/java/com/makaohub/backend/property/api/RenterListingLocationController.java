@@ -1,7 +1,6 @@
 package com.makaohub.backend.property.api;
 
 import com.makaohub.backend.property.service.RenterListingLocationAccessService;
-import org.springframework.context.annotation.Profile;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,7 +13,6 @@ import org.springframework.http.HttpStatus;
 import java.util.UUID;
 
 @RestController
-@Profile("mock")
 @RequestMapping("/api/v1/renter/listings")
 public class RenterListingLocationController {
 

@@ -2,7 +2,6 @@ package com.makaohub.backend.payment.service;
 
 import com.makaohub.backend.auth.domain.User;
 import com.makaohub.backend.auth.repository.UserRepository;
-import com.makaohub.backend.auth.service.PhoneProtectionService;
 import com.makaohub.backend.payment.domain.PaymentIntent;
 import com.makaohub.backend.payment.domain.PaymentTargetKind;
 import com.makaohub.backend.payment.domain.PaymentType;
@@ -16,6 +15,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,37 +24,31 @@ import static org.mockito.Mockito.when;
 class PaystackPaymentProviderTest {
 
     @Mock private UserRepository userRepository;
-    @Mock private PhoneProtectionService phoneProtectionService;
     @Mock private PaystackClient paystackClient;
 
     @Test
-    void noPhoneMeansNoExternalCharge() {
+    void missingPayerMeansNoExternalCheckout() {
         UUID payerId = UUID.randomUUID();
-        User payer = new User("Synthetic", "synthetic@example.invalid", null, null);
-        when(userRepository.findById(payerId)).thenReturn(Optional.of(payer));
         PaymentIntent intent = new PaymentIntent(payerId, PaymentType.PLAN_UPGRADE,
                 null, null, PaymentTargetKind.NONE, 500, PaymentIntent.KES, "synthetic-no-phone");
         var failure = org.junit.jupiter.api.Assertions.assertThrows(
-                org.springframework.web.server.ResponseStatusException.class,
-                () -> new PaystackPaymentProvider(userRepository, phoneProtectionService, paystackClient).start(intent));
-        assertEquals(409, failure.getStatusCode().value());
-        org.mockito.Mockito.verifyNoInteractions(phoneProtectionService, paystackClient);
+                IllegalStateException.class,
+                () -> new PaystackPaymentProvider(userRepository, paystackClient).start(intent));
+        assertTrue(failure.getMessage().contains("payer"));
+        org.mockito.Mockito.verifyNoInteractions(paystackClient);
     }
 
     @Test
-    void sendsOnlyNormalizedPhoneToPaystackAndReturnsProviderPrompt() {
+    void startsHostedCheckoutWithoutSendingStoredPhone() {
         UUID payerId = UUID.randomUUID();
         User payer = org.mockito.Mockito.mock(User.class);
-        byte[] ciphertext = new byte[]{1, 2, 3};
         when(userRepository.findById(payerId)).thenReturn(Optional.of(payer));
         when(payer.getEmail()).thenReturn("renter@example.com");
-        when(payer.getPhoneCiphertext()).thenReturn(ciphertext);
-        when(phoneProtectionService.decrypt(ciphertext)).thenReturn("0712345678");
-        when(paystackClient.charge(
+        when(paystackClient.initialize(
                 eq("renter@example.com"), eq(1_500L),
-                org.mockito.ArgumentMatchers.anyString(), eq("254712345678")
-        )).thenReturn(new PaystackClient.ChargeStart(
-                "ps-ref-1", "pay_offline", "Approve the prompt on your phone."
+                org.mockito.ArgumentMatchers.anyString()
+        )).thenReturn(new PaystackClient.CheckoutStart(
+                "ps-ref-1", "https://checkout.paystack.com/test123", "test123"
         ));
 
         PaymentIntent intent = new PaymentIntent(
@@ -69,11 +63,13 @@ class PaystackPaymentProviderTest {
         );
 
         ProviderPaymentStart start = new PaystackPaymentProvider(
-                userRepository, phoneProtectionService, paystackClient
+                userRepository, paystackClient
         ).start(intent);
 
         assertEquals("ps-ref-1", start.providerReference());
-        assertEquals("Approve the prompt on your phone.", start.displayText());
-        verify(phoneProtectionService).decrypt(ciphertext);
+        assertEquals("https://checkout.paystack.com/test123", start.authorizationUrl());
+        assertEquals("test123", start.accessCode());
+        assertTrue(start.displayText().contains("return to Makao Hub"));
+        verify(paystackClient).initialize("renter@example.com", 1_500L, "MH-" + intent.getId());
     }
 }

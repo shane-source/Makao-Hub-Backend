@@ -94,8 +94,14 @@ public class NotificationService {
                 notification.getTitle(),
                 notification.getBody(),
                 notification.getReadAt() != null,
-                notification.getCreatedAt()
+                notification.getCreatedAt(), notification.getBookingId()
         );
+    }
+
+    @Transactional
+    public void bookingNotice(UUID userId, UUID bookingId, NotificationType type, String title, String body) {
+        requireActiveUser(userId);
+        notificationRepository.insertBookingNotice(UUID.randomUUID(),userId,bookingId,type.name(),title,body);
     }
 
     private void requireActiveUser(UUID userId) {

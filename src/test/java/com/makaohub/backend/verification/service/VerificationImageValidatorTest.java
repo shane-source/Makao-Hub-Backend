@@ -1,6 +1,7 @@
 package com.makaohub.backend.verification.service;
 
 import com.makaohub.backend.verification.domain.VerificationDocumentType;
+import com.makaohub.backend.storage.service.SupabaseStorageClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -13,15 +14,13 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class VerificationImageValidatorTest {
-    private final ClamAvScanner scanner = mock(ClamAvScanner.class);
     private final KenyanNationalIdValidator nationalId = mock(KenyanNationalIdValidator.class);
-    private final VerificationImageValidator validator = new VerificationImageValidator(scanner, nationalId);
+    private final VerificationImageValidator validator = new VerificationImageValidator(nationalId);
 
-    @Test void imagesAreScannedDecodedAndReencodedWithoutTrustingDeclaredMime() throws Exception {
+    @Test void imagesAreDecodedAndReencodedWithoutTrustingDeclaredMime() throws Exception {
         for (String format : new String[] {"JPEG", "PNG"}) {
             byte[] bytes = image(format);
             byte[] prepared = validator.prepare(bytes, format.equals("JPEG") ? "image/jpeg" : "image/png", VerificationDocumentType.SELFIE);
-            verify(scanner).assertClean(bytes);
             var actual = ImageIO.read(new ByteArrayInputStream(prepared));
             assertEquals(64, actual.getWidth()); assertEquals(32, actual.getHeight());
         }
@@ -29,12 +28,8 @@ class VerificationImageValidatorTest {
         verifyNoInteractions(nationalId);
     }
 
-    @Test void malformedAndScannerFailureNeverProducePreparedEvidence() throws Exception {
+    @Test void malformedImagesNeverProducePreparedEvidence() throws Exception {
         assertThrows(ResponseStatusException.class, () -> validator.prepare(new byte[] {1,2,3}, "image/jpeg", VerificationDocumentType.SELFIE));
-        byte[] bytes = image("JPEG");
-        doThrow(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE)).when(scanner).assertClean(bytes);
-        assertEquals(503, assertThrows(ResponseStatusException.class,
-                () -> validator.prepare(bytes, "image/jpeg", VerificationDocumentType.SELFIE)).getStatusCode().value());
     }
 
     @Test void sourceMetadataIsNotCopiedIntoPreparedJpeg() throws Exception {
@@ -72,6 +67,18 @@ class VerificationImageValidatorTest {
         assertThrows(ResponseStatusException.class,
                 () -> validator.prepare(new byte[]{1, 2}, "image/jpeg", VerificationDocumentType.ID_FRONT));
         verifyNoInteractions(nationalId);
+    }
+
+    @Test void storedIdPairIsClearedAfterMatchingOrFailure() {
+        var storage = mock(SupabaseStorageClient.class);
+        byte[] front = {1, 2}, back = {3, 4};
+        when(storage.readVerificationDocument("owned/front", 2)).thenReturn(front);
+        when(storage.readVerificationDocument("owned/back", 2)).thenReturn(back);
+        doThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST)).when(nationalId).assertMatchingNames(front, back);
+        assertThrows(ResponseStatusException.class, () -> validator.assertMatchingStoredIdNames(
+                storage, "owned/front", 2L, "owned/back", 2L));
+        assertArrayEquals(new byte[2], front);
+        assertArrayEquals(new byte[2], back);
     }
 
     private byte[] image(String format) throws Exception {

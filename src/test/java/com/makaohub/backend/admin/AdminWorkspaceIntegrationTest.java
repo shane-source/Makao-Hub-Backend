@@ -54,7 +54,8 @@ class AdminWorkspaceIntegrationTest {
     @BeforeAll void setup() throws Exception {
         String url=System.getenv("MAKAO_ROLE_TEST_DB_URL");
         assertTrue(url.matches("jdbc:postgresql://(127\\.0\\.0\\.1|localhost):[0-9]+/makao_role_test"));
-        var source=new DriverManagerDataSource(url+"?currentSchema="+schema,System.getenv().getOrDefault("MAKAO_ROLE_TEST_DB_USER","hp"),"");
+        var source=new DriverManagerDataSource(url+"?currentSchema="+schema,System.getenv().getOrDefault("MAKAO_ROLE_TEST_DB_USER","hp"),
+                System.getenv().getOrDefault("MAKAO_ROLE_TEST_DB_PASSWORD",""));
         Flyway.configure().dataSource(source).schemas(schema).defaultSchema(schema).target("57").load().migrate();
         sql=new JdbcTemplate(source);
         sql.update("INSERT INTO users(id,email,full_name,password_hash) VALUES (?,?,'Test owner','not-a-live-password')",owner,owner+"@example.invalid");
@@ -88,7 +89,8 @@ class AdminWorkspaceIntegrationTest {
         var normalizer=proxy(new LegacyRoleSelectionService(em,roles,userRoles),manager);
         var passwordLogin=proxy(new PasswordAuthenticationService(users,passwords,tokens,normalizer),manager);
         var emailProperties=new EmailOtpProperties("sender@example.invalid",Base64.getEncoder().encodeToString(new byte[32]));
-        var otp=proxy(new AuthOtpService(otpRows,users,refreshRows,emailProperties,mail,tokens,passwords,Clock.systemUTC()),manager);
+        var otp=proxy(new AuthOtpService(otpRows,users,refreshRows,emailProperties,mail,tokens,passwords,Clock.systemUTC(),
+                repositories.getRepository(GoogleIdentityRepository.class)),manager);
         db=proxy(new AdminStore(sql),manager); access=new StaffAccessService(db);
         work=proxy(new AdminWorkflowService(db,access,storage,new ChatContactMaskingService()),manager);
         reports=proxy(new UserReportService(db,access,new ChatContactMaskingService(),work),manager);

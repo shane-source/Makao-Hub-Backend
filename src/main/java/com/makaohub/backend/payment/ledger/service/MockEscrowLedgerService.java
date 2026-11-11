@@ -93,7 +93,7 @@ public class MockEscrowLedgerService {
                     LedgerAccountType.RENTER_CLEARING));
             lines.add(line(transactionId, intent, booking, LedgerComponent.COMMISSION,
                     LedgerSide.CREDIT, booking.getCommissionAmountMinor(),
-                    LedgerAccountType.PLATFORM_REVENUE));
+                    LedgerAccountType.ESCROW_HOLD));
         }
         ledgerEntryRepository.saveAll(lines);
         auditService.recordLedgerPosted(intent, booking);
@@ -126,6 +126,8 @@ public class MockEscrowLedgerService {
                 .findAllByBookingId(booking.getId());
         long rentReleased = 0;
         long depositReleased = 0;
+        long commissionHeld = 0;
+        long commissionRecognized = 0;
         for (LedgerEntry line : bookingLines) {
             if (line.getAccountType() == LedgerAccountType.OWNER_PAYABLE
                     && line.getSide() == LedgerSide.CREDIT) {
@@ -134,10 +136,18 @@ public class MockEscrowLedgerService {
                 } else if (line.getComponent() == LedgerComponent.DEPOSIT) {
                     depositReleased += line.getAmountMinor();
                 }
+            } else if (line.getComponent() == LedgerComponent.COMMISSION
+                    && line.getSide() == LedgerSide.CREDIT) {
+                if (line.getAccountType() == LedgerAccountType.ESCROW_HOLD) {
+                    commissionHeld += line.getAmountMinor();
+                } else if (line.getAccountType() == LedgerAccountType.PLATFORM_REVENUE) {
+                    commissionRecognized += line.getAmountMinor();
+                }
             }
         }
         if (rentReleased == booking.getRentAmountMinor()
-                && depositReleased == booking.getDepositAmountMinor()) {
+                && depositReleased == booking.getDepositAmountMinor()
+                && commissionRecognized == booking.getCommissionAmountMinor()) {
             return;
         }
         if (rentReleased != 0 || depositReleased != 0) {
@@ -146,9 +156,21 @@ public class MockEscrowLedgerService {
                     "The payout ledger is incomplete and needs reconciliation."
             );
         }
+        // Old test bookings recognized the fee at hold time; leave those
+        // immutable ledger lines intact. New bookings hold the fee until release.
+        boolean releaseCommission = commissionHeld == booking.getCommissionAmountMinor()
+                && commissionRecognized == 0 && commissionHeld > 0;
+        boolean legacyCommission = commissionHeld == 0
+                && commissionRecognized == booking.getCommissionAmountMinor();
+        if (!releaseCommission && !legacyCommission) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "The commission ledger is incomplete and needs reconciliation."
+            );
+        }
 
         UUID transactionId = UUID.randomUUID();
-        ledgerEntryRepository.saveAll(List.of(
+        List<LedgerEntry> releaseLines = new java.util.ArrayList<>(List.of(
                 line(transactionId, intent, booking, LedgerComponent.RENT,
                         LedgerSide.DEBIT, booking.getRentAmountMinor(),
                         LedgerAccountType.ESCROW_HOLD),
@@ -162,7 +184,32 @@ public class MockEscrowLedgerService {
                         LedgerSide.CREDIT, booking.getDepositAmountMinor(),
                         LedgerAccountType.OWNER_PAYABLE)
         ));
+        if (releaseCommission) {
+            releaseLines.add(line(transactionId, intent, booking, LedgerComponent.COMMISSION,
+                    LedgerSide.DEBIT, booking.getCommissionAmountMinor(),
+                    LedgerAccountType.ESCROW_HOLD));
+            releaseLines.add(line(transactionId, intent, booking, LedgerComponent.COMMISSION,
+                    LedgerSide.CREDIT, booking.getCommissionAmountMinor(),
+                    LedgerAccountType.PLATFORM_REVENUE));
+        }
+        ledgerEntryRepository.saveAll(releaseLines);
         auditService.recordEscrowReleased(intent, booking, adminUserId);
+    }
+
+    /** Called only under the transfer/booking row lock after provider verification; retries do not duplicate lines. */
+    @Transactional
+    public void recordTestTransferSettlement(PaymentIntent intent,Booking booking,boolean reversed) {
+        if(booking.getStatus()!=BookingStatus.ACTIVE || booking.getReleasedAt()==null
+                || intent.getPaymentType()!=PaymentType.BOOKING || !booking.getId().equals(intent.getBookingId()))
+            throw new IllegalStateException("A verified booking release is required.");
+        UUID transaction=UUID.randomUUID();
+        LedgerAccountType debit=reversed?LedgerAccountType.OWNER_PAYOUT:LedgerAccountType.OWNER_PAYABLE;
+        LedgerAccountType credit=reversed?LedgerAccountType.OWNER_PAYABLE:LedgerAccountType.OWNER_PAYOUT;
+        ledgerEntryRepository.saveAll(List.of(
+            line(transaction,intent,booking,LedgerComponent.RENT,LedgerSide.DEBIT,booking.getRentAmountMinor(),debit),
+            line(transaction,intent,booking,LedgerComponent.RENT,LedgerSide.CREDIT,booking.getRentAmountMinor(),credit),
+            line(transaction,intent,booking,LedgerComponent.DEPOSIT,LedgerSide.DEBIT,booking.getDepositAmountMinor(),debit),
+            line(transaction,intent,booking,LedgerComponent.DEPOSIT,LedgerSide.CREDIT,booking.getDepositAmountMinor(),credit)));
     }
 
     private static LedgerEntry line(
