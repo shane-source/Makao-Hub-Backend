@@ -18,6 +18,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.List;
@@ -26,6 +30,8 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -181,5 +187,34 @@ class ProfileServiceTest {
                 phoneProtectionService,
                 storageClient
         );
+    }
+
+    @Test
+    void logsFailedProfileStageWithoutSensitiveExceptionMessages() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(user.getAccountStatus()).thenReturn(AccountStatus.ACTIVE);
+        when(userRoleRepository.findAllByUser_Id(USER_ID)).thenReturn(List.of(userRole));
+        when(userRole.getRole()).thenReturn(role);
+        when(role.getName()).thenReturn(RoleName.LANDLORD);
+        byte[] encrypted = {1, 2, 3};
+        when(user.getPhoneCiphertext()).thenReturn(encrypted);
+        when(phoneProtectionService.decrypt(encrypted)).thenThrow(new IllegalStateException("private phone and secret"));
+
+        Logger logger = (Logger) LoggerFactory.getLogger(ProfileService.class);
+        ListAppender<ILoggingEvent> capture = new ListAppender<>();
+        capture.start();
+        logger.addAppender(capture);
+        try {
+            assertThrows(IllegalStateException.class, () -> profileService.getMyProfile(USER_ID));
+            assertEquals(1, capture.list.size());
+            ILoggingEvent event = capture.list.getFirst();
+            assertTrue(event.getFormattedMessage().contains("stage=phone_decryption"));
+            assertTrue(event.getFormattedMessage().contains("error=IllegalStateException"));
+            assertFalse(event.getFormattedMessage().contains("private phone and secret"));
+            assertEquals(null, event.getThrowableProxy());
+        } finally {
+            logger.detachAppender(capture);
+            capture.stop();
+        }
     }
 }

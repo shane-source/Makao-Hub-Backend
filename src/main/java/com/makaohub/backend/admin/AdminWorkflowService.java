@@ -1,6 +1,7 @@
 package com.makaohub.backend.admin;
 
 import com.makaohub.backend.messaging.service.ChatContactMaskingService;
+import com.makaohub.backend.payment.service.LandlordOfferService;
 import com.makaohub.backend.storage.service.SupabaseStorageClient;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
@@ -20,8 +21,9 @@ public class AdminWorkflowService {
     private final StaffAccessService access;
     private final SupabaseStorageClient storage;
     private final ChatContactMaskingService masking;
-    public AdminWorkflowService(AdminStore db,StaffAccessService access,SupabaseStorageClient storage,ChatContactMaskingService masking) {
-        this.db=db; this.access=access; this.storage=storage; this.masking=masking;
+    private final LandlordOfferService offers;
+    public AdminWorkflowService(AdminStore db,StaffAccessService access,SupabaseStorageClient storage,ChatContactMaskingService masking,LandlordOfferService offers) {
+        this.db=db; this.access=access; this.storage=storage; this.masking=masking; this.offers=offers;
     }
 
     public AdminStore.Page verificationQueue(Jwt jwt,String role,String state,String search,int page,int size) {
@@ -38,7 +40,7 @@ public class AdminWorkflowService {
                 WHERE v.role IN ('RENTER','LANDLORD','SUBLESSOR') AND v.status=?
                 AND (?::text IS NULL OR v.role=?) AND (?::uuid IS NULL OR a.reviewer_id=?)
                 AND (?::text IS NULL OR lower(u.full_name) LIKE lower(?) ESCAPE '\\')
-                ORDER BY v.submitted_at,v.user_id,v.role
+                ORDER BY (CASE WHEN v.status='PENDING' THEN v.submitted_at END) ASC NULLS LAST,v.updated_at DESC,v.user_id,v.role
                 """,page,size,state,role,role,reviewer,reviewer,search,search==null?null:"%"+search.replace("\\","\\\\").replace("%","\\%").replace("_","\\_")+"%");
         db.audit(staff.userId(),"VERIFICATION_QUEUE_VIEWED",null,"Assigned workload",null,"VIEWED");
         return result;
@@ -81,7 +83,8 @@ public class AdminWorkflowService {
         var source=evidence(role);
         // Owner lock serializes evidence replacement, resubmission and review.
         db.one("SELECT id FROM users WHERE id=? FOR UPDATE",subject);
-        db.one("SELECT user_id FROM role_verifications WHERE user_id=? AND role=? AND status='PENDING'",subject,role);
+        // Any decided case (pending, approved or rejected) stays viewable by the assigned reviewer or a Staff Lead; the case must exist.
+        db.one("SELECT user_id FROM role_verifications WHERE user_id=? AND role=? AND status IN ('PENDING','VERIFIED','REJECTED')",subject,role);
         var row=db.one("SELECT * FROM "+source.table()+" WHERE id=? AND "+source.owner()+"=? AND status='READY'",document,subject);
         String path=(String)row.get("object_path");
         if (!path.startsWith(subject+source.prefix())) throw AdminStore.conflict("Older evidence must be replaced through the protected upload flow.");
@@ -136,11 +139,18 @@ public class AdminWorkflowService {
         });
     }
 
-    public AdminStore.Page listings(Jwt jwt,String kind,String state,int page,int size) {
+    public AdminStore.Page listings(Jwt jwt,String kind,String state,int page,int size) { return listings(jwt,kind,state,"",page,size); }
+
+    public AdminStore.Page listings(Jwt jwt,String kind,String state,String sort,int page,int size) {
         var staff=access.require(jwt,SAFETY_VIEW); listing(kind);
         if (!Set.of("PENDING","APPROVED","REJECTED").contains(state)) throw AdminStore.bad("Unknown moderation state.");
         var source=listing(kind);
-        var result=db.page("SELECT id,title,status,moderation_status,moderation_reason,moderation_submitted_at,updated_at FROM "+source.table()+" WHERE moderation_status=? AND moderation_submitted_at IS NOT NULL AND status<>'ARCHIVED' ORDER BY moderation_submitted_at,id",page,size,state);
+        String subjectKind=kind.equals("LANDLORD")?"LANDLORD_LISTING":"SHARED_LISTING";
+        String order="reports".equals(sort)?"report_count DESC,l.moderation_submitted_at,l.id":"l.moderation_submitted_at,l.id";
+        var result=db.page("SELECT l.id,l.title,l.status,l.moderation_status,l.moderation_reason,l.moderation_submitted_at,l.updated_at,l.monthly_rent_kes,u.full_name AS owner_name,"+
+                "(SELECT m.id FROM "+source.media()+" m WHERE m."+source.foreignKey()+"=l.id AND m.confirmed_at IS NOT NULL AND m.content_type LIKE 'image/%' ORDER BY m.sort_order LIMIT 1) AS thumb_id,"+
+                "(SELECT COUNT(*) FROM user_reports r WHERE r.subject_kind='"+subjectKind+"' AND r.subject_id=l.id) AS report_count "+
+                "FROM "+source.table()+" l JOIN users u ON u.id=l."+source.owner()+" WHERE l.moderation_status=? AND l.moderation_submitted_at IS NOT NULL AND l.status<>'ARCHIVED' ORDER BY "+order,page,size,state);
         db.audit(staff.userId(),"LISTING_QUEUE_VIEWED",null,"Listing moderation",null,"VIEWED"); return result;
     }
 
@@ -154,6 +164,8 @@ public class AdminWorkflowService {
                 "COALESCE(loc.area_label,'Area not provided') AS public_area FROM "+source.table()+" l JOIN users u ON u.id=l."+source.owner()+
                 " LEFT JOIN "+source.location()+" loc ON loc."+source.foreignKey()+"=l.id WHERE l.id=?",source.role(),id);
         result.put("locationSaved",!"Area not provided".equals(result.get("public_area")));
+        result.put("reports",db.rows("SELECT category,safe_description,priority,state,created_at FROM user_reports WHERE subject_kind=? AND subject_id=? ORDER BY created_at DESC LIMIT 10",
+                kind.equals("LANDLORD")?"LANDLORD_LISTING":"SHARED_LISTING",id));
         result.put("media",db.rows("SELECT id,media_type,content_type,sort_order FROM "+source.media()+
                 " WHERE "+source.foreignKey()+"=? AND confirmed_at IS NOT NULL ORDER BY sort_order",id));
         db.audit(staff.userId(),"LISTING_REVIEW_VIEWED",id,"Media and claim review; exact location omitted",null,"VIEWED"); return result;
@@ -171,19 +183,30 @@ public class AdminWorkflowService {
     public Map<String,Object> decideListing(Jwt jwt,UUID command,String kind,UUID id,AdminRequests.Decision request) {
         var staff=access.require(jwt,LISTING_MODERATION); var source=listing(kind);
         return db.command(staff.userId(),command,"LISTING:"+kind+":"+id+":"+request,() -> {
+            var ownerRow=db.one("SELECT "+source.owner()+" FROM "+source.table()+" WHERE id=?",id);
+            UUID owner=(UUID)ownerRow.get(source.owner());
+            db.one("SELECT id FROM users WHERE id=? FOR UPDATE",owner);
             var row=db.one("SELECT * FROM "+source.table()+" WHERE id=? FOR UPDATE",id); checkVersion(row,request.expectedUpdatedAt());
             if (!Set.of("DRAFT","PAUSED").contains(row.get("status"))) throw AdminStore.conflict("This listing is not available for a moderation decision.");
             if (!"PENDING".equals(row.get("moderation_status")) || row.get("moderation_submitted_at")==null) throw AdminStore.conflict("Listing is not submitted for review.");
-            UUID owner=(UUID)row.get(source.owner());
-            if (request.approve()) requireCompleteListing(source,id,owner);
+            // Approval is a moderation decision. It must never fail because the owner's plan is full:
+            // the listing is then approved but left unpublished until the owner frees a slot or upgrades.
+            boolean publish=request.approve();
+            if (request.approve()) {
+                requireCompleteListing(source,id,owner);
+                long published=((Number)db.one("SELECT COUNT(*) AS n FROM "+source.table()+" WHERE "+source.owner()+"=? AND status='PUBLISHED'",owner).get("n")).longValue();
+                int limit=kind.equals("LANDLORD")?offers.activeListingLimit(owner):offers.activeSublessorListingLimit(owner);
+                publish=published<limit;
+            }
             String next=request.approve()?"APPROVED":"REJECTED";
-            boolean restore=request.approve() && Boolean.TRUE.equals(row.get("restore_publication_after_review"));
-            String status=!request.approve()?"DRAFT":(restore?"PUBLISHED":(String)row.get("status"));
+            String status=publish?"PUBLISHED":"DRAFT";
             db.update("UPDATE "+source.table()+" SET moderation_status=?,moderation_reason=?,moderation_reviewed_by=?,moderation_reviewed_at=CURRENT_TIMESTAMP,status=?,updated_at=CURRENT_TIMESTAMP,restore_publication_after_review=FALSE WHERE id=?",
                     next,reason(request.reason()),staff.userId(),status,id);
-            notifyUser(owner,"LISTING_REVIEWED","Listing review update",request.approve()?"Your listing was approved. Open your listings to check publication.":"Your listing needs changes. Open the listing for the review reason.");
+            notifyUser(owner,"LISTING_REVIEWED","Listing review update",!request.approve()?"Your listing needs changes. Open the listing for the review reason."
+                    :publish?"Your listing was approved and published."
+                    :"Your listing was approved, but your plan's active listing limit is reached. Pause another listing or upgrade your plan, then publish this one.");
             db.audit(staff.userId(),"LISTING_MODERATION_DECIDED",id,reason(request.reason()),"PENDING",next);
-            return Map.of("listingId",id,"moderationStatus",next,"status",status);
+            return Map.of("listingId",id,"moderationStatus",next,"status",status,"published",publish);
         });
     }
 
@@ -202,11 +225,13 @@ public class AdminWorkflowService {
     public AdminStore.Page flags(Jwt jwt,int page,int size) {
         var staff=access.require(jwt,SAFETY_VIEW);
         var result=db.page("""
-                SELECT m.*,r.state AS review_state FROM (
-                  SELECT id,chat_thread_id,sender_id,masked_body,moderation_reason,created_at,'RENTAL' AS kind FROM rental_chat_messages WHERE moderation_status='FLAGGED'
+                SELECT m.*,r.state AS review_state,su.full_name AS sender_name FROM (
+                  SELECT id,chat_thread_id,sender_id,masked_body,moderation_reason,flag_codes,created_at,'RENTAL' AS kind FROM rental_chat_messages WHERE moderation_status='FLAGGED'
                   UNION ALL
-                  SELECT id,chat_thread_id,sender_id,masked_body,moderation_reason,created_at,'ROOMMATE' AS kind FROM roommate_chat_messages WHERE moderation_status='FLAGGED'
+                  SELECT id,chat_thread_id,sender_id,masked_body,moderation_reason,flag_codes,created_at,'ROOMMATE' AS kind FROM roommate_chat_messages WHERE moderation_status='FLAGGED'
                 ) m LEFT JOIN admin_message_reviews r ON r.message_id=m.id AND r.conversation_kind=m.kind
+                LEFT JOIN users su ON su.id=m.sender_id
+                WHERE r.state IS DISTINCT FROM 'CLEARED'
                 ORDER BY m.created_at DESC,m.kind,m.id
                 """,page,size);
         result.items().forEach(row -> row.put("masked_body",masking.mask((String)row.get("masked_body")).content()));
@@ -217,9 +242,9 @@ public class AdminWorkflowService {
         var staff=access.require(jwt,SAFETY); String table=messageTable(kind);
         return db.command(staff.userId(),command,"FLAG:"+kind+":"+message+":"+request,() -> {
             var row=db.one("SELECT sender_id FROM "+table+" WHERE id=? AND moderation_status='FLAGGED' FOR UPDATE",message);
-            String next=request.escalate()?"ESCALATED":"WARNED";
+            String next=request.clear()?"CLEARED":request.escalate()?"ESCALATED":"WARNED";
             db.update("INSERT INTO admin_message_reviews(message_id,conversation_kind,state,reviewed_by,reason) VALUES (?,?,?,?,?) ON CONFLICT(message_id,conversation_kind) DO UPDATE SET state=EXCLUDED.state,reviewed_by=EXCLUDED.reviewed_by,reason=EXCLUDED.reason,reviewed_at=CURRENT_TIMESTAMP",message,kind,next,staff.userId(),reason(request.reason()));
-            if (!request.escalate()) notifyUser((UUID)row.get("sender_id"),"MODERATION_WARNING","Chat safety warning","Keep communication inside Makao Hub. Contact-sharing attempts remain masked and flagged.");
+            if (!request.escalate() && !request.clear()) notifyUser((UUID)row.get("sender_id"),"MODERATION_WARNING","Chat safety warning","Keep communication inside Makao Hub. Contact-sharing attempts remain masked and flagged.");
             db.audit(staff.userId(),"MESSAGE_FLAG_REVIEWED",message,reason(request.reason()),"FLAGGED",next);
             return Map.of("messageId",message,"state",next);
         });
@@ -227,7 +252,7 @@ public class AdminWorkflowService {
 
     public AdminStore.Page payments(Jwt jwt,int page,int size) {
         var staff=access.require(jwt,PAYMENTS_VIEW);
-        var result=db.page("SELECT id,payment_type,booking_id,amount_minor,currency,status,created_at,completed_at FROM payment_intents ORDER BY created_at DESC,id",page,size);
+        var result=db.page("SELECT p.id,p.payment_type,p.booking_id,p.amount_minor,p.currency,p.status,p.created_at,p.completed_at,renter.full_name AS renter_name FROM payment_intents p LEFT JOIN bookings bk ON bk.id=p.booking_id LEFT JOIN users renter ON renter.id=bk.renter_id ORDER BY p.created_at DESC,p.id",page,size);
         db.audit(staff.userId(),"PAYMENT_RECORDS_VIEWED",null,"Permissioned read-only payment review",null,"VIEWED"); return result;
     }
 
@@ -264,22 +289,22 @@ public class AdminWorkflowService {
         var source=listing(kind);
         if (!List.of(source.role()).equals(jwt.getClaimAsStringList("roles"))) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         UUID owner=UUID.fromString(jwt.getSubject());
-        var row=db.one("SELECT id,status FROM "+source.table()+" WHERE id=? AND "+source.owner()+"=? AND status IN ('DRAFT','PAUSED') AND moderation_status='REJECTED' FOR UPDATE",id,owner);
-        db.update("UPDATE "+source.table()+" SET status='DRAFT',moderation_status='PENDING',moderation_submitted_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",id);
-        db.audit(owner,"REJECTED_LISTING_REVISION_STARTED",id,"Owner opened a draft for correction",row.get("status")+"_REJECTED","DRAFT");
+        var row=db.one("SELECT id,status,moderation_status FROM "+source.table()+" WHERE id=? AND "+source.owner()+"=? AND status IN ('DRAFT','PAUSED','PUBLISHED') FOR UPDATE",id,owner);
+        db.update("UPDATE "+source.table()+" SET status='DRAFT',moderation_status='PENDING',moderation_submitted_at=NULL,moderation_reason=NULL,moderation_reviewed_by=NULL,moderation_reviewed_at=NULL,restore_publication_after_review=FALSE,updated_at=CURRENT_TIMESTAMP WHERE id=?",id);
+        db.audit(owner,"LISTING_REVISION_STARTED",id,"Owner opened a listing for editing",row.get("status")+"_"+row.get("moderation_status"),"DRAFT");
         return Map.of("listingId",id,"status","DRAFT");
     }
 
     public AdminStore.Page audit(Jwt jwt,UUID actor,UUID subject,int page,int size) {
         var staff=access.require(jwt,AUDIT);
         db.audit(staff.userId(),"AUDIT_HISTORY_VIEWED",subject,"Operational audit review",null,"VIEWED");
-        return db.page("SELECT e.id,e.actor_id,u.full_name AS actor_name,e.action,e.subject_id,e.reason,e.previous_state,e.new_state,e.occurred_at FROM admin_audit_events e LEFT JOIN users u ON u.id=e.actor_id WHERE (?::uuid IS NULL OR e.actor_id=?) AND (?::uuid IS NULL OR e.subject_id=?) ORDER BY e.occurred_at DESC,e.id DESC",page,size,actor,actor,subject,subject);
+        return db.page("SELECT e.id,e.actor_id,u.full_name AS actor_name,e.action,e.subject_id,su.full_name AS subject_name,e.reason,e.previous_state,e.new_state,e.occurred_at FROM admin_audit_events e LEFT JOIN users u ON u.id=e.actor_id LEFT JOIN users su ON su.id=e.subject_id WHERE (?::uuid IS NULL OR e.actor_id=?) AND (?::uuid IS NULL OR e.subject_id=?) ORDER BY e.occurred_at DESC,e.id DESC",page,size,actor,actor,subject,subject);
     }
 
     public AdminStore.Page activity(Jwt jwt,int page,int size) {
         var staff=access.require(jwt);
         db.audit(staff.userId(),"OWN_ACTIVITY_VIEWED",null,"Staff reviewed their own activity",null,"VIEWED");
-        return db.page("SELECT e.id,e.actor_id,u.full_name AS actor_name,e.action,e.subject_id,e.reason,e.previous_state,e.new_state,e.occurred_at FROM admin_audit_events e LEFT JOIN users u ON u.id=e.actor_id WHERE e.actor_id=? ORDER BY e.occurred_at DESC,e.id DESC",page,size,staff.userId());
+        return db.page("SELECT e.id,e.actor_id,u.full_name AS actor_name,e.action,e.subject_id,su.full_name AS subject_name,e.reason,e.previous_state,e.new_state,e.occurred_at FROM admin_audit_events e LEFT JOIN users u ON u.id=e.actor_id LEFT JOIN users su ON su.id=e.subject_id WHERE e.actor_id=? ORDER BY e.occurred_at DESC,e.id DESC",page,size,staff.userId());
     }
 
     public Map<String,Object> export(Jwt jwt,UUID command,AdminRequests.AuditExport request) {

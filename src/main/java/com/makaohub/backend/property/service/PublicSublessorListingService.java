@@ -112,6 +112,24 @@ public class PublicSublessorListingService {
                 .toList();
     }
 
+    /**
+     * Photos of a home the renter has booked. The caller has already proved the booking, so the
+     * listing may be archived once the payout is released.
+     */
+    @Transactional(readOnly = true)
+    public List<PublicListingMediaResponse> findMediaForBookedRenter(
+            UUID listingId
+    ) {
+        return mediaRepository
+                .findAllBySublessorListingIdAndConfirmedAtIsNotNullOrderBySortOrderAsc(
+                        listingId
+                )
+                .stream()
+                .filter(media -> media.getMediaType() == ListingMediaType.IMAGE)
+                .map(this::toMediaResponse)
+                .toList();
+    }
+
     private PublicSublessorListingResponse toResponse(
             SublessorListing listing,
             SublessorListingLocation location

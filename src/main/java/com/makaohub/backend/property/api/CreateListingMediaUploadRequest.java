@@ -26,8 +26,8 @@ public record CreateListingMediaUploadRequest(
         long sizeBytes,
 
         @Max(
-                value = 30,
-                message = "Sort order cannot exceed 30."
+                value = 250,
+                message = "Sort order cannot exceed 250."
         )
         short sortOrder
 ) {

@@ -250,6 +250,15 @@ public class RoommateChatMessageService {
         RoommateChatMessage saved =
                 messageRepository.save(message);
 
+        if (masked.contactMasked() && masked.flagCodes() != null) {
+            // Safe category labels only (phone, email, ...); never the detected value.
+            entityManager.flush();
+            entityManager.createNativeQuery("UPDATE roommate_chat_messages SET flag_codes = ?1 WHERE id = ?2")
+                    .setParameter(1, masked.flagCodes())
+                    .setParameter(2, saved.getId())
+                    .executeUpdate();
+        }
+
         return toResponse(saved);
     }
 

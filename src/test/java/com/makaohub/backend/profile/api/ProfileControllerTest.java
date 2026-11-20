@@ -21,6 +21,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -58,6 +59,19 @@ class ProfileControllerTest {
                 .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(profileService);
+    }
+
+    @Test void photoDeletionRequiresAuthenticationAndUsesTheAuthenticatedOwner() throws Exception {
+        mockMvc.perform(delete("/api/v1/profile/me/avatar")).andExpect(status().isUnauthorized());
+        mockMvc.perform(delete("/api/v1/profile/me/avatar").with(jwt().jwt(jwt -> jwt.subject(USER_ID.toString())).authorities(
+                new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isForbidden());
+        for (String role : new String[]{"RENTER", "LANDLORD", "SUBLESSOR"}) {
+            mockMvc.perform(delete("/api/v1/profile/me/avatar").with(jwt().jwt(jwt -> jwt.subject(USER_ID.toString())).authorities(
+                    new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role))))
+                    .andExpect(status().isNoContent());
+        }
+        org.mockito.Mockito.verify(avatarUploadService, org.mockito.Mockito.times(3)).removeAvatar(USER_ID);
     }
 
     @Test void photoCapabilitiesRequireAuthenticationAndExposeValidationVersion() throws Exception {

@@ -34,7 +34,7 @@ class AvatarUploadServiceTest {
 
     @BeforeEach void setup() {
         service = new AvatarUploadService(users, storage, new UploadSecurityProperties(5_242_880, 10_485_760, 10, 10, 10, 10, 10), images);
-        when(users.findById(USER)).thenReturn(Optional.of(user));
+        when(users.findByIdForUpdate(USER)).thenReturn(Optional.of(user));
         when(user.getAccountStatus()).thenReturn(AccountStatus.ACTIVE);
     }
 
@@ -52,6 +52,23 @@ class AvatarUploadServiceTest {
         order.verify(user).changeAvatarObjectPath(path.getValue());
         assertTrue(path.getValue().startsWith(USER + "/"));
         assertNotEquals(PATH, path.getValue());
+    }
+
+    @Test void replacementRemovesPreviousPhotoOnlyAfterCommit() {
+        String oldPath = USER + "/00000000-0000-0000-0000-000000000003.jpg";
+        when(user.getId()).thenReturn(USER);
+        when(user.getAvatarObjectPath()).thenReturn(oldPath);
+        when(storage.getAvatarInfo(PATH)).thenReturn(new SupabaseStorageClient.StoredObjectInfo("image/jpeg", 3));
+        when(storage.readAvatar(PATH, 3)).thenReturn(new byte[]{1, 2, 3});
+        when(images.prepare(any(), eq("image/jpeg"), eq(VerificationDocumentType.SELFIE))).thenReturn(new byte[]{4, 5});
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.confirmUpload(USER, PATH);
+            verify(storage, never()).deleteAvatar(oldPath);
+            org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations().forEach(
+                    org.springframework.transaction.support.TransactionSynchronization::afterCommit);
+            verify(storage).deleteAvatar(oldPath);
+        } finally { org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization(); }
     }
 
     @Test void rejectsAnotherUsersPathBeforeStorageAccess() {

@@ -36,6 +36,7 @@ public class BookingPaymentService {
     private final UserRoleRepository userRoleRepository;
     private final MockEscrowLedgerService escrowLedgerService;
     private final MockPaymentAuditService auditService;
+    private final ListingBookingLock listingBookingLock;
 
     public BookingPaymentService(
             BookingRepository bookingRepository,
@@ -44,7 +45,8 @@ public class BookingPaymentService {
             UserRepository userRepository,
             UserRoleRepository userRoleRepository,
             MockEscrowLedgerService escrowLedgerService,
-            MockPaymentAuditService auditService
+            MockPaymentAuditService auditService,
+            ListingBookingLock listingBookingLock
     ) {
         this.bookingRepository = bookingRepository;
         this.paymentIntentRepository = paymentIntentRepository;
@@ -53,6 +55,7 @@ public class BookingPaymentService {
         this.userRoleRepository = userRoleRepository;
         this.escrowLedgerService = escrowLedgerService;
         this.auditService = auditService;
+        this.listingBookingLock = listingBookingLock;
     }
 
     @Transactional
@@ -95,6 +98,7 @@ public class BookingPaymentService {
                         "The booking is not awaiting payment."
                 );
             }
+            listingBookingLock.requireAvailableForBooking(bookingId, renterId);
             booking.beginPayment();
             bookingRepository.save(booking);
         }

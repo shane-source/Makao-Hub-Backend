@@ -34,6 +34,15 @@ public class SupabaseStorageClient {
 
     private static final int SIGNED_URL_TTL_SECONDS = 300;
 
+    /**
+     * Signed links last 300 seconds. A link made in the last 60 seconds is reused, so a screen that asks for the same
+     * photos again does not make Supabase sign them again. At least 240 seconds of the link's life is always left.
+     */
+    private static final long MEDIA_URL_REUSE_MS = 60_000L;
+    private static final int MEDIA_URL_REUSE_MAX = 2_000;
+    private record ReusableUrl(String url, long madeAt) {}
+    private final java.util.concurrent.ConcurrentHashMap<String, ReusableUrl> mediaUrls = new java.util.concurrent.ConcurrentHashMap<>();
+
     private final RestClient restClient;
     private final SupabaseStorageProperties properties;
 
@@ -115,9 +124,19 @@ public class SupabaseStorageClient {
     }
 
     public void deleteUnconfirmedAvatar(String objectPath) {
-        try { restClient.delete().uri("/object/" + properties.avatarBucket() + "/" + objectPath).retrieve().toBodilessEntity(); }
-        catch (RestClientResponseException failure) { if (failure.getStatusCode().value() != 404) throw failure; }
+        try {
+            restClient.method(org.springframework.http.HttpMethod.DELETE)
+                    .uri("/object/" + properties.avatarBucket())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("prefixes", List.of(objectPath)))
+                    .retrieve().toBodilessEntity();
+        } catch (RestClientResponseException failure) {
+            if (failure.getStatusCode().value() != 404) throw failure;
+        }
     }
+
+    /** Delete an owned avatar; already-absent objects are treated as removed. */
+    public void deleteAvatar(String objectPath) { deleteUnconfirmedAvatar(objectPath); }
 
     /** Bounded private listing-media download for authenticated staff review. */
     public byte[] readListingMedia(String objectPath, long expectedBytes) {
@@ -236,11 +255,23 @@ public class SupabaseStorageClient {
     public String createSignedListingMediaReadUrl(
             String objectPath
     ) {
-        return createSignedReadUrl(
+        long now = System.currentTimeMillis();
+        ReusableUrl hit = mediaUrls.get(objectPath);
+        if (hit != null && now - hit.madeAt() < MEDIA_URL_REUSE_MS) {
+            return hit.url();
+        }
+        String url = createSignedReadUrl(
                 properties.listingMediaBucket(),
                 objectPath,
                 "listing media"
         );
+        if (url != null) {
+            if (mediaUrls.size() >= MEDIA_URL_REUSE_MAX) {
+                mediaUrls.clear();
+            }
+            mediaUrls.put(objectPath, new ReusableUrl(url, now));
+        }
+        return url;
     }
 
     public void deleteListingMedia(

@@ -45,7 +45,17 @@ public class LandlordOfferController {
         return new Catalogue(1, offers.activeListingLimit(landlordId),
                 Arrays.stream(LandlordOffer.values()).map(value ->
                         new Offer(value.name(), value.amountMinor, value.duration.toDays(),
-                                value.listingLimit)).toList(), offers.activeGrants(landlordId));
+                                value.listingLimit, value.estimatedReach, publicPhotoLimit(value.photoLimit),
+                                value.includedBoosts)).toList(), offers.activeGrants(landlordId),
+                LandlordOffer.FREE_PHOTO_LIMIT, publicPhotoLimit(offers.photoLimit(landlordId, false)),
+                offers.boostCredits(landlordId, false));
+    }
+
+    /** Uses the boost included with an active Pro Max plan on one published listing. */
+    @PostMapping("/boost-credit/redeem")
+    public RedeemResult redeemIncludedBoost(@AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody RedeemRequest request) {
+        return new RedeemResult(offers.redeemIncludedBoost(landlord(jwt), request.listingId(), false));
     }
 
     @GetMapping("/insights")
@@ -84,8 +94,15 @@ public class LandlordOfferController {
         }
     }
 
+    static int publicPhotoLimit(int limit) { return limit == Integer.MAX_VALUE ? -1 : limit; }
+
+    public record RedeemRequest(@jakarta.validation.constraints.NotNull UUID listingId) {}
+    public record RedeemResult(java.time.Instant boostExpiresAt) {}
     public record Purchase(@NotBlank @Size(max = 20) String code, UUID listingId) {}
-    public record Offer(String code, long amountMinor, long days, int listingLimit) {}
+    public record Offer(String code, long amountMinor, long days, int listingLimit, int estimatedReach,
+            int photoLimit, int includedBoosts) {}
+    /** photoLimit values of -1 mean unlimited. */
     public record Catalogue(int starterLimit, int activeListingLimit, List<Offer> offers,
-            List<LandlordOfferService.ActiveGrant> activeGrants) {}
+            List<LandlordOfferService.ActiveGrant> activeGrants, int freePhotoLimit, int activePhotoLimit,
+            int boostCredits) {}
 }

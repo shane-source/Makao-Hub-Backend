@@ -95,6 +95,7 @@ public class LandlordOfferService {
                 VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (payment_intent_id) DO NOTHING
                 """, intent.getId(), intent.getPayerUserId(), intent.getListingId(), intent.getOfferCode(),
                     Timestamp.from(start), Timestamp.from(start.plus(offer.duration)));
+            grantIncludedBoost(intent, offer, true, start);
             return;
         }
         jdbc.update("""
@@ -102,6 +103,78 @@ public class LandlordOfferService {
             VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (payment_intent_id) DO NOTHING
             """, intent.getId(), intent.getPayerUserId(), intent.getListingId(), offer.name(),
                 Timestamp.from(start), Timestamp.from(start.plus(offer.duration)));
+        grantIncludedBoost(intent, offer, false, start);
+    }
+
+    /** A Pro Max plan includes one 7-day boost, usable on any published listing while the plan is active. */
+    private void grantIncludedBoost(PaymentIntent intent, LandlordOffer offer, boolean sublessor, Instant start) {
+        if (offer.includedBoosts <= 0) return;
+        jdbc.update("""
+            INSERT INTO plan_boost_credits(payment_intent_id, owner_id, sublessor, expires_at)
+            VALUES (?, ?, ?, ?) ON CONFLICT (payment_intent_id) DO NOTHING
+            """, intent.getId(), intent.getPayerUserId(), sublessor, Timestamp.from(start.plus(offer.duration)));
+    }
+
+    @Transactional(readOnly = true)
+    public int boostCredits(UUID ownerId, boolean sublessor) {
+        Integer count = jdbc.queryForObject("""
+            SELECT COUNT(*) FROM plan_boost_credits
+            WHERE owner_id = ? AND sublessor = ? AND redeemed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+            """, Integer.class, ownerId, sublessor);
+        return count == null ? 0 : count;
+    }
+
+    @Transactional
+    public Instant redeemIncludedBoost(UUID ownerId, UUID listingId, boolean sublessor) {
+        LandlordOffer boost = LandlordOffer.BOOST_7D;
+        if (sublessor) requireSublessorOffer(ownerId, "SUB_" + boost.name(), listingId);
+        else requireOffer(ownerId, boost.name(), listingId);
+        String grants = sublessor ? "sublessor_offer_grants" : "landlord_offer_grants";
+        String ownerColumn = sublessor ? "sublessor_id" : "landlord_id";
+        Boolean alreadyBoosted = jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM " + grants
+                + " WHERE listing_id = ? AND starts_at <= CURRENT_TIMESTAMP AND expires_at > CURRENT_TIMESTAMP)",
+                Boolean.class, listingId);
+        if (Boolean.TRUE.equals(alreadyBoosted)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This listing is already boosted.");
+        }
+        UUID credit = jdbc.query("""
+            SELECT id FROM plan_boost_credits
+            WHERE owner_id = ? AND sublessor = ? AND redeemed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+            ORDER BY expires_at ASC LIMIT 1 FOR UPDATE
+            """, rs -> rs.next() ? rs.getObject(1, UUID.class) : null, ownerId, sublessor);
+        if (credit == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "No included boost is available on your plan.");
+        }
+        Instant start = Instant.now();
+        Instant end = start.plus(boost.duration);
+        jdbc.update("INSERT INTO " + grants + "(" + ownerColumn + ", listing_id, offer_code, starts_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+                ownerId, listingId, sublessor ? "SUB_" + boost.name() : boost.name(),
+                Timestamp.from(start), Timestamp.from(end));
+        jdbc.update("UPDATE plan_boost_credits SET redeemed_at = ?, redeemed_listing_id = ? WHERE id = ?",
+                Timestamp.from(start), listingId, credit);
+        return end;
+    }
+
+    /** Photos allowed per listing under the owner's active plan (Integer.MAX_VALUE = unlimited). */
+    @Transactional(readOnly = true)
+    public int photoLimit(UUID ownerId, boolean sublessor) {
+        String table = sublessor ? "sublessor_offer_grants" : "landlord_offer_grants";
+        String column = sublessor ? "sublessor_id" : "landlord_id";
+        String code = jdbc.query("SELECT offer_code FROM " + table + " WHERE " + column
+                + " = ? AND listing_id IS NULL AND starts_at <= CURRENT_TIMESTAMP AND expires_at > CURRENT_TIMESTAMP"
+                + " ORDER BY CASE WHEN offer_code LIKE '%PRO_MAX_30D' THEN 2 ELSE 1 END DESC LIMIT 1",
+                rs -> rs.next() ? rs.getString(1) : null, ownerId);
+        if (code == null) return LandlordOffer.FREE_PHOTO_LIMIT;
+        return LandlordOffer.valueOf(code.startsWith("SUB_") ? code.substring(4) : code).photoLimit;
+    }
+
+    /** Existing photos are always kept; this only blocks adding more than the plan allows. */
+    public void requirePhotoSlot(UUID ownerId, boolean sublessor, long existingImages) {
+        int limit = photoLimit(ownerId, sublessor);
+        if (limit != Integer.MAX_VALUE && existingImages >= limit) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Your plan allows " + limit
+                    + " photos per listing. Upgrade your plan to add more.");
+        }
     }
 
     @Transactional(readOnly = true)

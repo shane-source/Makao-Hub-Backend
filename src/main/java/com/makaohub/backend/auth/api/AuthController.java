@@ -7,7 +7,9 @@ import com.makaohub.backend.auth.service.GoogleRegistrationService;
 import com.makaohub.backend.auth.service.PasswordAuthenticationService;
 import com.makaohub.backend.auth.service.RefreshTokenService;
 import com.makaohub.backend.auth.service.RegistrationService;
+import com.makaohub.backend.auth.domain.AccountStatus;
 import com.makaohub.backend.auth.domain.RoleName;
+import com.makaohub.backend.auth.domain.User;
 import com.makaohub.backend.auth.exception.AuthException;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -68,14 +70,23 @@ public class AuthController {
         );
     }
 
+    /**
+     * Signing in does not ask for an email code. The password is the proof, so an active
+     * account gets its tokens straight away. Only a deactivated account still gets a
+     * REACTIVATION code, because that confirms the owner really wants it switched back on.
+     * The reply is either the token body or the challenge body; clients tell them apart
+     * by the presence of accessToken.
+     */
     @PostMapping("/login")
-    public OtpChallengeResponse login(
+    public Object login(
             @Valid @RequestBody LoginRequest request
     ) {
         requirePublicLoginRole(request.expectedRole());
-        return authOtpService.startLogin(
-                passwordAuthenticationService.verifyCredentials(request)
-        );
+        User user = passwordAuthenticationService.verifyCredentials(request);
+        if (user.getAccountStatus() == AccountStatus.ACTIVE && !user.isRoleSelectionRequired()) {
+            return authenticationTokenService.issue(user);
+        }
+        return authOtpService.startLogin(user);
     }
 
     @PostMapping("/login/verify-otp")
@@ -134,11 +145,11 @@ public class AuthController {
     }
 
     @PostMapping("/google")
-    public OtpChallengeResponse authenticateWithGoogle(
+    public Object authenticateWithGoogle(
             @Valid @RequestBody GoogleAuthRequest request
     ) {
         requirePublicLoginRole(request.expectedRole());
-        return googleAuthenticationService.startLogin(request.idToken(), request.expectedRole());
+        return googleAuthenticationService.signIn(request.idToken(), request.expectedRole());
     }
 
     private void requirePublicLoginRole(RoleName expectedRole) {

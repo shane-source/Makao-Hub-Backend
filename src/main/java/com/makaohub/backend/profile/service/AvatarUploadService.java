@@ -12,6 +12,10 @@ import com.makaohub.backend.verification.domain.VerificationDocumentType;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.UUID;
@@ -19,6 +23,8 @@ import java.util.regex.Pattern;
 
 @Service
 public class AvatarUploadService {
+
+    private static final Logger log = LoggerFactory.getLogger(AvatarUploadService.class);
 
     private static final Pattern AVATAR_FILE_NAME = Pattern.compile(
             "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
@@ -69,7 +75,7 @@ public class AvatarUploadService {
             UUID authenticatedUserId,
             String objectPath
     ) {
-        User user = activeUser(authenticatedUserId);
+        User user = activeUserForUpdate(authenticatedUserId);
 
         if (!isOwnedAvatarPath(user.getId(), objectPath)) {
             throw invalidAvatarUpload();
@@ -100,7 +106,33 @@ public class AvatarUploadService {
             } finally { java.util.Arrays.fill(clean, (byte) 0); }
         } finally { if (original != null) java.util.Arrays.fill(original, (byte) 0); }
         storageClient.deleteUnconfirmedAvatar(objectPath);
+        String previousPath = user.getAvatarObjectPath();
         user.changeAvatarObjectPath(cleanPath);
+        if (previousPath != null && isOwnedAvatarPath(user.getId(), previousPath) && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() {
+                    try { storageClient.deleteAvatar(previousPath); }
+                    catch (RuntimeException failure) { log.warn("Could not remove a replaced profile photo from storage.", failure); }
+                }
+            });
+        }
+    }
+
+    @Transactional
+    public void removeAvatar(UUID authenticatedUserId) {
+        User user = activeUserForUpdate(authenticatedUserId);
+        String oldPath = user.getAvatarObjectPath();
+        if (oldPath != null) {
+            if (!isOwnedAvatarPath(user.getId(), oldPath)) throw invalidAvatarUpload();
+            storageClient.deleteAvatar(oldPath);
+            user.removeAvatar();
+        }
+    }
+
+    private User activeUserForUpdate(UUID authenticatedUserId) {
+        User user = userRepository.findByIdForUpdate(authenticatedUserId).orElseThrow(AvatarUploadService::accountUnavailable);
+        if (user.getAccountStatus() != AccountStatus.ACTIVE) throw accountUnavailable();
+        return user;
     }
 
     private User activeUser(UUID authenticatedUserId) {

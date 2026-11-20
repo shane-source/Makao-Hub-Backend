@@ -41,6 +41,9 @@ public class AdminController {
                     "View and mark every required current document reviewed before approval.",
                     "The record changed. Reload before deciding.",
                     "Only pending verification can be decided.",
+                    "Your active listing limit is reached. Upgrade your plan or pause a listing.",
+                    "The owner must have current role verification.",
+                    "A private location and confirmed photo are required.",
                     "Older evidence must be replaced through the protected upload flow.")
                     .contains(Objects.toString(failure.getReason(),"")))
                 detail=failure.getReason();
@@ -81,8 +84,8 @@ public class AdminController {
         return work.decideVerification(jwt,key,user,role,body);
     }
     @GetMapping("/listings") public AdminStore.Page listingQueue(@AuthenticationPrincipal Jwt jwt,@RequestParam String kind,
-            @RequestParam(defaultValue="PENDING") String state,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) {
-        return work.listings(jwt,kind,state,page,size);
+            @RequestParam(defaultValue="PENDING") String state,@RequestParam(defaultValue="") String sort,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) {
+        return work.listings(jwt,kind,state,sort,page,size);
     }
     @GetMapping("/listings/{kind}/{id}") public Map<String,Object> listing(@AuthenticationPrincipal Jwt jwt,@PathVariable String kind,@PathVariable UUID id) { return work.listingDetail(jwt,kind,id); }
     @GetMapping("/listings/{kind}/{id}/media/{media}") public ResponseEntity<byte[]> listingMedia(@AuthenticationPrincipal Jwt jwt,

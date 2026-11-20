@@ -41,7 +41,30 @@ public class GoogleAuthenticationService {
 
     @Transactional
     public OtpChallengeResponse startLogin(String idToken, RoleName expectedRole) {
+        return challengeFor(verifyGoogleToken(idToken), expectedRole);
+    }
+
+    /**
+     * An already-linked Google account signs in without an email code, because Google has
+     * just proved who it is. A Google account that is not linked yet (only matched by email)
+     * still gets a code, since that code is what confirms the link is allowed.
+     * Returns the token body, or the challenge body when a code is needed.
+     */
+    @Transactional
+    public Object signIn(String idToken, RoleName expectedRole) {
         var identity = verifyGoogleToken(idToken);
+        var linked = googleIdentityRepository.findByGoogleSubject(identity.subject());
+        if (linked.isPresent()) {
+            User user = linked.get().getUser();
+            requireActiveRole(user, expectedRole);
+            if (user.getAccountStatus() == AccountStatus.ACTIVE && !user.isRoleSelectionRequired()) {
+                return authenticationTokenService.issue(user);
+            }
+        }
+        return challengeFor(identity, expectedRole);
+    }
+
+    private OtpChallengeResponse challengeFor(GoogleIdTokenVerifier.VerifiedGoogleIdentity identity, RoleName expectedRole) {
         // Email is only a candidate lookup, never sufficient proof to link or issue tokens.
         User user = googleIdentityRepository.findByGoogleSubject(identity.subject())
                 .map(GoogleIdentity::getUser)

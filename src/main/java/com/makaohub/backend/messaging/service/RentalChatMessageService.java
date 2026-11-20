@@ -180,6 +180,14 @@ public class RentalChatMessageService {
         RentalChatMessage saved =
                 messageRepository.saveAndFlush(message);
 
+        if (masked.contactMasked() && masked.flagCodes() != null) {
+            // Safe category labels only (phone, email, ...); never the detected value.
+            entityManager.createNativeQuery("UPDATE rental_chat_messages SET flag_codes = ?1 WHERE id = ?2")
+                    .setParameter(1, masked.flagCodes())
+                    .setParameter(2, saved.getId())
+                    .executeUpdate();
+        }
+
         return result(saved, thread, true);
     }
 

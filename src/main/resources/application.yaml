@@ -24,8 +24,8 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     hikari:
-      maximum-pool-size: ${DB_POOL_MAX_SIZE:5}
-      minimum-idle: ${DB_POOL_MIN_IDLE:1}
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
 
   jpa:
     open-in-view: false
@@ -42,6 +42,9 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  # Set FORWARD_HEADERS_STRATEGY=native on a host that puts a proxy or load balancer in front of the app,
+  # so rate limits see each visitor's address instead of the proxy's. Leave it as "none" when exposed directly.
+  forward-headers-strategy: ${FORWARD_HEADERS_STRATEGY:none}
 
 management:
   endpoints:
@@ -108,6 +111,10 @@ storage:
 makao:
   role-switch:
     enabled: ${MAKAO_ROLE_SWITCH_ENABLED:false}
+  jirani:
+    api-key: ${MAKAO_JIRANI_API_KEY:${GROQ_API_KEY:}}
+    model: ${MAKAO_JIRANI_MODEL:llama-3.3-70b-versatile}
+    base-url: ${MAKAO_JIRANI_BASE_URL:https://api.groq.com/openai}
   daraja:
     enabled: ${DARAJA_ENABLED:false}
     base-url: ${DARAJA_BASE_URL:https://sandbox.safaricom.co.ke}

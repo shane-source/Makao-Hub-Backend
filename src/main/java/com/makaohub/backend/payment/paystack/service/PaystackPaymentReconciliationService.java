@@ -35,6 +35,8 @@ import java.util.UUID;
 @Profile("paystack")
 public class PaystackPaymentReconciliationService {
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("makao.payments");
+
     private final PaymentIntentRepository paymentIntentRepository;
     private final PaystackClient paystackClient;
     private final ListingUnlockEntitlementService entitlementService;
@@ -79,6 +81,9 @@ public class PaystackPaymentReconciliationService {
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Payment intent was not found."
                 ));
+        // What Paystack said about this payment, to explain a payment that stays PENDING. No secrets or personal data.
+        LOG.info("PAYSTACK_RECONCILE ref={} providerStatus={} providerAmount={} intentAmount={} currency={} localStatus={}",
+                normalized, result.status(), result.amountMinor(), intent.getAmountMinor(), result.currency(), intent.getStatus());
 
         if (intent.getStatus() != PaymentStatus.PENDING) {
             return intent;

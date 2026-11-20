@@ -43,6 +43,7 @@ class BookingPaymentServiceTest {
     @Mock private UserRoleRepository userRoleRepository;
     @Mock private MockEscrowLedgerService escrowLedgerService;
     @Mock private MockPaymentAuditService auditService;
+    @Mock private ListingBookingLock bookingLock;
 
     @Test
     void startsOneServerPricedBookingPayment() {
@@ -189,7 +190,8 @@ class BookingPaymentServiceTest {
                 userRepository,
                 userRoleRepository,
                 escrowLedgerService,
-                auditService
+                auditService,
+                bookingLock
         );
     }
 

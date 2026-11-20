@@ -125,7 +125,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/payments/paystack/return").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/profile/me/phone/complete")
                         .hasAnyRole("RENTER", "LANDLORD", "SUBLESSOR")
-                        .requestMatchers("/api/v1/profile/me/avatar/**")
+                        .requestMatchers("/api/v1/profile/me/avatar", "/api/v1/profile/me/avatar/**")
                         .hasAnyRole("RENTER", "LANDLORD", "SUBLESSOR")
                         .requestMatchers("/api/v1/profile/me/deletion-request", "/api/v1/profile/me/account-action/**")
                         .hasAnyRole("RENTER", "LANDLORD", "SUBLESSOR")

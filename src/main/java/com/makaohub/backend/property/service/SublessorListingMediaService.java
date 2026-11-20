@@ -5,6 +5,7 @@ import com.makaohub.backend.auth.domain.RoleName;
 import com.makaohub.backend.auth.domain.User;
 import com.makaohub.backend.auth.repository.UserRepository;
 import com.makaohub.backend.auth.repository.UserRoleRepository;
+import com.makaohub.backend.payment.service.LandlordOfferService;
 import com.makaohub.backend.property.api.CreateListingMediaUploadRequest;
 import com.makaohub.backend.property.api.ListingMediaResponse;
 import com.makaohub.backend.property.api.ListingMediaUploadResponse;
@@ -28,7 +29,7 @@ import java.util.UUID;
 @Service
 public class SublessorListingMediaService {
 
-    private static final long MAX_IMAGES_PER_LISTING = 20;
+    private static final long MAX_IMAGES_PER_LISTING = 200; // technical ceiling; plans set the real limit
     private static final long MAX_VIDEOS_PER_LISTING = 1;
 
     private final UserRepository userRepository;
@@ -36,19 +37,22 @@ public class SublessorListingMediaService {
     private final SublessorListingRepository listingRepository;
     private final SublessorListingMediaRepository mediaRepository;
     private final SupabaseStorageClient storageClient;
+    private final LandlordOfferService offerService;
 
     public SublessorListingMediaService(
             UserRepository userRepository,
             UserRoleRepository userRoleRepository,
             SublessorListingRepository listingRepository,
             SublessorListingMediaRepository mediaRepository,
-            SupabaseStorageClient storageClient
+            SupabaseStorageClient storageClient,
+            LandlordOfferService offerService
     ) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
         this.listingRepository = listingRepository;
         this.mediaRepository = mediaRepository;
         this.storageClient = storageClient;
+        this.offerService = offerService;
     }
 
     @Transactional
@@ -92,8 +96,12 @@ public class SublessorListingMediaService {
                 && existingMedia >= MAX_IMAGES_PER_LISTING) {
             throw new ResponseStatusException(
                     HttpStatus.TOO_MANY_REQUESTS,
-                    "A listing cannot contain more than 20 images."
+                    "A listing cannot contain more than 200 images."
             );
+        }
+
+        if (request.mediaType() == ListingMediaType.IMAGE) {
+            offerService.requirePhotoSlot(authenticatedSublessorId, true, existingMedia);
         }
 
         if (request.mediaType() == ListingMediaType.VIDEO

@@ -7,6 +7,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -86,6 +87,12 @@ public class ProfileController {
                 extractUserId(jwt),
                 request.objectPath()
         );
+    }
+
+    @DeleteMapping("/me/avatar")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeAvatar(@AuthenticationPrincipal Jwt jwt) {
+        avatarUploadService.removeAvatar(extractUserId(jwt));
     }
 
     private UUID extractUserId(Jwt jwt) {

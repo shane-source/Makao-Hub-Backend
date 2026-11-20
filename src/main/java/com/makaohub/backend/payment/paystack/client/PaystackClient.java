@@ -9,6 +9,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.List;
 import java.util.Objects;
 import java.net.URI;
@@ -16,6 +19,8 @@ import java.net.URI;
 /** Minimal Paystack API client. It never exposes the secret key or provider body. */
 @Service
 public class PaystackClient {
+
+    private static final Logger log = LoggerFactory.getLogger(PaystackClient.class);
 
     private final PaystackProperties properties;
     private final RestClient restClient;
@@ -65,6 +70,10 @@ public class PaystackClient {
             if (response == null || !response.status() || response.data() == null
                     || !reference.equals(response.data().reference())
                     || !isCheckoutUrl(response.data().authorizationUrl())) {
+                log.error("PAYSTACK_INIT_REJECTED reference={} status={} message=\"{}\" returnedReference={} urlOk={}",
+                        reference, response == null ? "null" : response.status(), response == null ? "" : response.message(),
+                        response == null || response.data() == null ? "none" : response.data().reference(),
+                        response != null && response.data() != null && isCheckoutUrl(response.data().authorizationUrl()));
                 throw new IllegalStateException("Paystack did not return a valid hosted checkout.");
             }
             return new CheckoutStart(
@@ -73,7 +82,14 @@ public class PaystackClient {
                     response.data().accessCode()
             );
         } catch (RestClientResponseException exception) {
+            log.error("PAYSTACK_INIT_FAILED reference={} amountMinor={} http={} providerBody={}",
+                    reference, amountMinor, exception.getStatusCode().value(), snippet(exception));
             throw new IllegalStateException("Paystack checkout initialization failed.", exception);
+        } catch (RuntimeException exception) {
+            if (!(exception instanceof IllegalStateException) && !(exception instanceof IllegalArgumentException)) {
+                log.error("PAYSTACK_INIT_UNREACHABLE reference={} error={}", reference, exception.toString());
+            }
+            throw exception;
         }
     }
 
@@ -92,6 +108,7 @@ public class PaystackClient {
                     .body(VerifyEnvelope.class);
 
             if (response == null || !response.status() || response.data() == null) {
+                log.error("PAYSTACK_VERIFY_EMPTY reference={} message=\"{}\"", reference, response == null ? "" : response.message());
                 throw new IllegalStateException("Paystack verification returned no payment data.");
             }
             return new VerificationResult(
@@ -101,12 +118,23 @@ public class PaystackClient {
                     response.data().currency()
             );
         } catch (RestClientResponseException exception) {
+            log.error("PAYSTACK_VERIFY_FAILED reference={} http={} providerBody={}",
+                    reference, exception.getStatusCode().value(), snippet(exception));
             throw new IllegalStateException("Paystack verification request failed.", exception);
         }
     }
 
+    /** Paystack's own error text (e.g. "Currency not supported by merchant"), trimmed; contains no secrets. */
+    private static String snippet(RestClientResponseException exception) {
+        String body = exception.getResponseBodyAsString();
+        if (body == null) return "";
+        body = body.replaceAll("sk_(test|live)_[A-Za-z0-9]+", "sk_***").replaceAll("\\s+", " ");
+        return body.length() > 400 ? body.substring(0, 400) + "..." : body;
+    }
+
     private void requireEnabled() {
         if (!properties.enabled()) {
+            log.error("PAYSTACK_DISABLED makao.paystack.enabled is false; set MAKAO_PAYSTACK_ENABLED=true");
             throw new IllegalStateException("Paystack integration is disabled.");
         }
     }
@@ -114,6 +142,7 @@ public class PaystackClient {
     private String secretKey() {
         String key = required(properties.secretKey(), "MAKAO_PAYSTACK_SECRET_KEY");
         if (!key.startsWith("sk_test_")) {
+            log.error("PAYSTACK_KEY_REJECTED secret key does not start with sk_test_");
             throw new IllegalStateException("Only a Paystack test secret key is supported by this test-only payment flow.");
         }
         return key;
@@ -121,6 +150,7 @@ public class PaystackClient {
 
     private static String required(String value, String name) {
         if (value == null || value.isBlank()) {
+            LoggerFactory.getLogger(PaystackClient.class).error("PAYSTACK_CONFIG_MISSING {} is not set", name);
             throw new IllegalStateException(name + " is not configured.");
         }
         return value.strip();

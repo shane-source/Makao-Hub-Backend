@@ -15,7 +15,7 @@ public class RenterHomeService {
     public record Home(UUID id, String source, String title, String description, String propertyType,
         long monthlyRentKes, Integer bedroomCount, short bathroomCount, boolean furnished, LocalDate availableFrom,
         String areaLabel, BigDecimal approximateLatitude, BigDecimal approximateLongitude, short approximateRadiusMeters,
-        boolean sponsored) {}
+        boolean sponsored, boolean bookedByYou) {}
     public record HomePage(List<Home> items, int page, boolean hasNext) {}
     private final JdbcTemplate jdbc;
     public RenterHomeService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
@@ -51,7 +51,7 @@ public class RenterHomeService {
             rs.getString("property_type"),rs.getLong("monthly_rent_kes"),rs.getObject("bedroom_count",Integer.class),
             rs.getShort("bathroom_count"),rs.getBoolean("furnished"),rs.getObject("available_from",LocalDate.class),
             rs.getString("area_label"),rs.getBigDecimal("approximate_latitude"),rs.getBigDecimal("approximate_longitude"),rs.getShort("approximate_radius_meters"),
-            rs.getBoolean("sponsored"));
+            rs.getBoolean("sponsored"), false);
     }
     @Transactional(readOnly=true)
     public HomePage search(UUID actor, int page, int size, String area, Long min, Long max, String source, Integer bedrooms, Boolean furnished,
@@ -80,7 +80,36 @@ public class RenterHomeService {
     @Transactional(readOnly=true) public Home available(UUID actor, String source, UUID id) {
         actor(actor); source(source);
         return jdbc.query("SELECT h.* FROM "+HOMES+" WHERE h.source=? AND h.id=?",this::map,source,id)
-            .stream().findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,"Home unavailable."));
+            .stream().findFirst()
+            .or(() -> bookedByRenter(actor, source, id))
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,"Home unavailable."));
+    }
+    /**
+     * A home leaves the marketplace once the payout is released. The renter who booked it can still
+     * open it, marked as booked by them. Nobody else can.
+     */
+    private Optional<Home> bookedByRenter(UUID actor, String source, UUID id) {
+        String sql = "LANDLORD".equals(source) ? """
+            SELECT l.id,'LANDLORD' AS source,l.title,l.description,l.property_type,l.monthly_rent_kes,
+              l.bedroom_count::integer AS bedroom_count,l.bathroom_count,l.furnished,l.available_from,p.area_label,
+              p.approximate_latitude,p.approximate_longitude,p.approximate_radius_meters,FALSE AS sponsored
+            FROM listings l LEFT JOIN listing_locations p ON p.listing_id=l.id
+            WHERE l.id=? AND EXISTS(SELECT 1 FROM bookings b WHERE b.listing_id=l.id AND b.listing_kind='LANDLORD_LISTING'
+              AND b.renter_id=? AND (b.released_at IS NOT NULL OR b.status IN ('PAID_HELD','ACTIVE')))
+            """ : """
+            SELECT l.id,'SUBLESSOR' AS source,l.title,l.description,l.space_type AS property_type,l.monthly_rent_kes,
+              NULL::integer AS bedroom_count,l.bathroom_count,l.furnished,l.available_from,p.area_label,
+              p.approximate_latitude,p.approximate_longitude,p.approximate_radius_meters,FALSE AS sponsored
+            FROM sublessor_listings l LEFT JOIN sublessor_listing_locations p ON p.sublessor_listing_id=l.id
+            WHERE l.id=? AND EXISTS(SELECT 1 FROM bookings b WHERE b.listing_id=l.id AND b.listing_kind='SUBLESSOR_LISTING'
+              AND b.renter_id=? AND (b.released_at IS NOT NULL OR b.status IN ('PAID_HELD','ACTIVE')))
+            """;
+        return jdbc.query(sql, (rs, row) -> {
+            Home h = map(rs, row);
+            return new Home(h.id(), h.source(), h.title(), h.description(), h.propertyType(), h.monthlyRentKes(),
+                h.bedroomCount(), h.bathroomCount(), h.furnished(), h.availableFrom(), h.areaLabel(),
+                h.approximateLatitude(), h.approximateLongitude(), h.approximateRadiusMeters(), false, true);
+        }, id, actor).stream().findFirst();
     }
     @Transactional public Home one(UUID actor, String source, UUID id) {
         Home home = available(actor, source, id);

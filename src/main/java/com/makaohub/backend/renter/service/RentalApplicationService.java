@@ -11,11 +11,13 @@ import com.makaohub.backend.notification.service.NotificationService;
 import com.makaohub.backend.property.domain.Listing;
 import com.makaohub.backend.property.domain.ListingStatus;
 import com.makaohub.backend.property.repository.ListingRepository;
+import com.makaohub.backend.renter.api.ApplicationSubmission;
 import com.makaohub.backend.renter.api.RentalApplicationResponse;
 import com.makaohub.backend.renter.domain.RentalApplication;
 import com.makaohub.backend.renter.repository.RentalApplicationRepository;
 import com.makaohub.backend.verification.service.RoleVerificationGuard;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -33,6 +35,7 @@ public class RentalApplicationService {
     private final RentalChatThreadService rentalChatThreadService;
     private final NotificationService notificationService;
     private final RoleVerificationGuard verificationGuard;
+    private final JdbcTemplate jdbc;
 
     public RentalApplicationService(
             UserRepository userRepository,
@@ -41,7 +44,8 @@ public class RentalApplicationService {
             RentalApplicationRepository applicationRepository,
             RentalChatThreadService rentalChatThreadService,
             NotificationService notificationService,
-            RoleVerificationGuard verificationGuard
+            RoleVerificationGuard verificationGuard,
+            JdbcTemplate jdbc
     ) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
@@ -50,6 +54,7 @@ public class RentalApplicationService {
         this.rentalChatThreadService = rentalChatThreadService;
         this.notificationService = notificationService;
         this.verificationGuard = verificationGuard;
+        this.jdbc = jdbc;
     }
 
     /**
@@ -62,7 +67,8 @@ public class RentalApplicationService {
     @Transactional
     public RentalApplicationResponse apply(
             UUID renterId,
-            UUID listingId
+            UUID listingId,
+            ApplicationSubmission submission
     ) {
         requireActiveRenter(renterId);
         verificationGuard.requireVerified(renterId, RoleName.RENTER);
@@ -74,6 +80,18 @@ public class RentalApplicationService {
                 HttpStatus.NOT_FOUND,
                 "Published listing not found."
         ));
+
+        UUID reopenedId = reopenSuperseded(renterId, listingId, submission);
+        if (reopenedId != null) {
+            RentalApplication reopened = applicationRepository.findById(reopenedId).orElseThrow();
+            notificationService.create(
+                    listing.getLandlordId(),
+                    NotificationType.APPLICATION_SUBMITTED,
+                    "Renter applied again",
+                    "A renter applied again after you updated the listing. Approve to continue at the new price."
+            );
+            return toResponse(reopened);
+        }
 
         if (applicationRepository.existsByRenterIdAndListingId(
                 renterId,
@@ -89,7 +107,9 @@ public class RentalApplicationService {
                 applicationRepository.save(
                         new RentalApplication(
                                 renterId,
-                                listingId
+                                listingId,
+                                submission.moveInDate(),
+                                submission.message()
                         )
                 );
 
@@ -110,6 +130,28 @@ public class RentalApplicationService {
         );
 
         return toResponse(application);
+    }
+
+    /**
+     * After the owner changes the price or deposit, an approved application is removed from the renter's
+     * list. Applying again reopens that same application for the owner to approve at the new terms.
+     */
+    private UUID reopenSuperseded(UUID renterId, UUID listingId, ApplicationSubmission submission) {
+        List<UUID> ids = jdbc.query(
+                "UPDATE rental_applications a SET status = 'SUBMITTED', move_in_date = ?, message = ?, updated_at = CURRENT_TIMESTAMP "
+                        + "FROM superseded_applications s "
+                        + "WHERE s.kind = 'LANDLORD' AND s.application_id = a.id AND a.renter_id = ? AND a.listing_id = ? "
+                        + "AND a.status = 'WITHDRAWN' RETURNING a.id",
+                (rs, row) -> rs.getObject(1, UUID.class),
+                submission.moveInDate() == null ? null : java.sql.Date.valueOf(submission.moveInDate()),
+                submission.message(), renterId, listingId);
+        if (ids.isEmpty()) {
+            return null;
+        }
+        UUID id = ids.get(0);
+        jdbc.update("DELETE FROM superseded_applications WHERE kind = 'LANDLORD' AND application_id = ?", id);
+        jdbc.update("DELETE FROM renter_application_states WHERE kind = 'LANDLORD' AND application_id = ? AND user_id = ?", id, renterId);
+        return id;
     }
 
     @Transactional(readOnly = true)
@@ -180,7 +222,11 @@ public class RentalApplicationService {
                 application.getListingId(),
                 application.getStatus(),
                 application.getCreatedAt(),
-                application.getUpdatedAt()
+                application.getUpdatedAt(),
+                application.getRejectionReason(),
+                null, null, null,
+                application.getMoveInDate(),
+                application.getMessage()
         );
     }
 

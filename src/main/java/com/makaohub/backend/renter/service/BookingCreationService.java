@@ -44,6 +44,7 @@ public class BookingCreationService {
     private final SublessorHouseholdService sublessorHouseholdService;
     private final BookingCommissionService commissionService;
     private final RoleVerificationGuard verificationGuard;
+    private final ListingBookingLock listingBookingLock;
 
     public BookingCreationService(
             UserRepository userRepository,
@@ -56,7 +57,8 @@ public class BookingCreationService {
             BookingDepositPricingService depositPricingService,
             SublessorHouseholdService sublessorHouseholdService,
             BookingCommissionService commissionService,
-            RoleVerificationGuard verificationGuard
+            RoleVerificationGuard verificationGuard,
+            ListingBookingLock listingBookingLock
     ) {
         this.userRepository = userRepository;
         this.userRoleRepository = userRoleRepository;
@@ -69,6 +71,7 @@ public class BookingCreationService {
         this.sublessorHouseholdService = sublessorHouseholdService;
         this.commissionService = commissionService;
         this.verificationGuard = verificationGuard;
+        this.listingBookingLock = listingBookingLock;
     }
 
     /** New listings use their persisted owner-entered deposit; historical rows retain the configured fallback. */
@@ -95,6 +98,8 @@ public class BookingCreationService {
         if (existing != null) {
             return existing;
         }
+        listingBookingLock.requireAvailable(
+                BookingListingKind.LANDLORD_LISTING.name(), listing.getId(), renterId);
 
         long rentAmountMinor = toMinorUnits(listing.getMonthlyRentKes());
         long depositAmountMinor = listing.getDepositKes() == null
@@ -142,6 +147,8 @@ public class BookingCreationService {
         if (existing != null) {
             return existing;
         }
+        listingBookingLock.requireAvailable(
+                BookingListingKind.SUBLESSOR_LISTING.name(), listing.getId(), renterId);
 
         long rentAmountMinor = toMinorUnits(listing.getMonthlyRentKes());
         Long depositKes = sublessorHouseholdService.depositKesForBooking(listing.getId());

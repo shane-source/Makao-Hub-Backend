@@ -7,6 +7,7 @@ import com.makaohub.backend.auth.repository.*;
 import com.makaohub.backend.auth.service.*;
 import com.makaohub.backend.auth.exception.AuthException;
 import com.makaohub.backend.messaging.service.ChatContactMaskingService;
+import com.makaohub.backend.payment.service.LandlordOfferService;
 import com.makaohub.backend.storage.service.SupabaseStorageClient;
 import jakarta.persistence.*;
 import org.flywaydb.core.Flyway;
@@ -92,7 +93,7 @@ class AdminWorkspaceIntegrationTest {
         var otp=proxy(new AuthOtpService(otpRows,users,refreshRows,emailProperties,mail,tokens,passwords,Clock.systemUTC(),
                 repositories.getRepository(GoogleIdentityRepository.class)),manager);
         db=proxy(new AdminStore(sql),manager); access=new StaffAccessService(db);
-        work=proxy(new AdminWorkflowService(db,access,storage,new ChatContactMaskingService()),manager);
+        work=proxy(new AdminWorkflowService(db,access,storage,new ChatContactMaskingService(),mock(LandlordOfferService.class)),manager);
         reports=proxy(new UserReportService(db,access,new ChatContactMaskingService(),work),manager);
         invites=proxy(new StaffInvitationService(db,access,mail,passwords,emailProperties),manager);
         auth=proxy(new StaffAuthService(db,passwordLogin,otp,tokens,refreshRows,access,manager),manager);
@@ -163,7 +164,7 @@ class AdminWorkspaceIntegrationTest {
         assertEquals(bookingsBefore,sql.queryForObject("SELECT count(*) FROM bookings",Long.class));
         assertNotNull(work.verificationCase(lead,owner,"LANDLORD"));
         assertEquals(403,assertThrows(ResponseStatusException.class,()->work.flagAction(lead,UUID.randomUUID(),"RENTAL",UUID.randomUUID(),
-                new AdminRequests.MessageAction(false,"Not authorised"))).getStatusCode().value());
+                new AdminRequests.MessageAction(false,"Not authorised",false))).getStatusCode().value());
         assertEquals(403,assertThrows(ResponseStatusException.class,()->reports.act(lead,UUID.randomUUID(),UUID.randomUUID(),
                 new AdminRequests.ReportAction("RESOLVED","NORMAL",false,false,"Not authorised"))).getStatusCode().value());
         assertEquals(403,assertThrows(ResponseStatusException.class,()->work.flags(payment,0,20)).getStatusCode().value());
@@ -357,8 +358,7 @@ class AdminWorkspaceIntegrationTest {
         Instant version=(Instant)db.one("SELECT updated_at FROM listings WHERE id=?",listing).get("updated_at");
         assertEquals("APPROVED",work.decideListing(lead,UUID.randomUUID(),"LANDLORD",listing,
                 new AdminRequests.Decision(true,version,"Staff lead reviewed media and claims")).get("moderationStatus"));
-        assertEquals("DRAFT",sql.queryForObject("SELECT status FROM listings WHERE id=?",String.class,listing));
-        assertEquals(1,sql.update("UPDATE listings SET status='PUBLISHED' WHERE id=?",listing));
+        assertEquals("PUBLISHED",sql.queryForObject("SELECT status FROM listings WHERE id=?",String.class,listing));
         assertEquals("PUBLISHED",sql.queryForObject("SELECT status FROM listings WHERE id=?",String.class,listing));
     }
 
@@ -422,6 +422,28 @@ class AdminWorkspaceIntegrationTest {
         assertEquals("DRAFT",sql.queryForObject("SELECT status FROM listings WHERE id=?",String.class,listing));
         assertEquals("PENDING",sql.queryForObject("SELECT moderation_status FROM listings WHERE id=?",String.class,listing));
         assertNull(sql.queryForObject("SELECT moderation_submitted_at FROM listings WHERE id=?",Instant.class,listing));
+    }
+
+    @Test void ownersCanRevisePublishedListingsButCannotReviseOthersOrArchivedOnes() {
+        UUID landlordListing=completeListing();
+        sql.update("UPDATE listings SET moderation_status='APPROVED',status='PUBLISHED' WHERE id=?",landlordListing);
+        Jwt ownerToken=Jwt.withTokenValue("owner").header("alg","RS256").subject(owner.toString()).claim("roles",List.of("LANDLORD")).build();
+        Jwt stranger=Jwt.withTokenValue("stranger").header("alg","RS256").subject(UUID.randomUUID().toString()).claim("roles",List.of("LANDLORD")).build();
+        assertThrows(ResponseStatusException.class, () -> work.reviseListing(stranger,"LANDLORD",landlordListing));
+        work.reviseListing(ownerToken,"LANDLORD",landlordListing);
+        assertEquals("DRAFT",sql.queryForObject("SELECT status FROM listings WHERE id=?",String.class,landlordListing));
+        assertEquals("PENDING",sql.queryForObject("SELECT moderation_status FROM listings WHERE id=?",String.class,landlordListing));
+        assertNull(sql.queryForObject("SELECT moderation_submitted_at FROM listings WHERE id=?",Instant.class,landlordListing));
+        sql.update("UPDATE listings SET status='ARCHIVED' WHERE id=?",landlordListing);
+        assertThrows(ResponseStatusException.class, () -> work.reviseListing(ownerToken,"LANDLORD",landlordListing));
+
+        UUID host=UUID.randomUUID(), room=UUID.randomUUID();
+        sql.update("INSERT INTO users(id,email,full_name,password_hash) VALUES (?,?,'Host','unused')",host,host+"@example.invalid");
+        sql.update("INSERT INTO sublessor_listings(id,sublessor_id,title,description,space_type,monthly_rent_kes,status,moderation_status) VALUES (?,?,'Room','Synthetic','SPARE_ROOM',18000,'PUBLISHED','APPROVED')",room,host);
+        Jwt hostToken=Jwt.withTokenValue("host").header("alg","RS256").subject(host.toString()).claim("roles",List.of("SUBLESSOR")).build();
+        work.reviseListing(hostToken,"SUBLESSOR",room);
+        assertEquals("DRAFT",sql.queryForObject("SELECT status FROM sublessor_listings WHERE id=?",String.class,room));
+        assertEquals("PENDING",sql.queryForObject("SELECT moderation_status FROM sublessor_listings WHERE id=?",String.class,room));
     }
 
     @Test void auditExportIsPermissionedBoundedAndReplayDoesNotCreateAnotherExport() {

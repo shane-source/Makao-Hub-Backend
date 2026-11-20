@@ -48,6 +48,7 @@ class BookingCreationServiceTest {
     @Mock private SublessorHouseholdService sublessorHouseholdService;
     @Mock private BookingCommissionService commissionService;
     @Mock private RoleVerificationGuard verificationGuard;
+    @Mock private ListingBookingLock bookingLock;
 
     @Test
     void snapshotsRentAndDepositOnlyForApprovedApplication() {
@@ -174,7 +175,8 @@ class BookingCreationServiceTest {
                 depositPricingService,
                 sublessorHouseholdService,
                 commissionService,
-                verificationGuard
+                verificationGuard,
+                bookingLock
         );
     }
 

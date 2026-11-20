@@ -223,7 +223,7 @@ public class BookingTestPayoutService {
                 ledger.recordBookingRelease(payment,booking,booking.getRenterId());
                 ledger.recordTestTransferSettlement(payment,booking,false);
                 notices.bookingNotice(booking.getOwnerId(),booking.getId(),NotificationType.TEST_PAYOUT_STATUS,
-                        "TEST payout confirmed","Paystack verified the TEST transfer of rent and deposit. No real money moved.");
+                        "Payment released","Your rent and deposit payment has been sent to your M-Pesa number.");
                 notices.bookingNotice(booking.getRenterId(),booking.getId(),NotificationType.TEST_PAYOUT_STATUS,
                         "TEST payout confirmed","Your True response and the five-minute wait were checked. Paystack verified the TEST payout.");
             } else if(after.equals("REVERSED") && before.equals("SUCCEEDED")) {

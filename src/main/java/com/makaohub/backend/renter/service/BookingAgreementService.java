@@ -123,7 +123,8 @@ public class BookingAgreementService {
             }
             String ownerName = userRepository.findById(ownerId).orElseThrow().getFullName();
             notifications.bookingNotice(booking.getRenterId(), bookingId, NotificationType.MOVE_IN_REPORTED,
-                    "Did you move in?", ownerName + " reported that you moved in. Select True only if this is correct; False keeps payment held for staff review.");
+                    "Did you move in?", ownerName + " says you have moved into your new home. Tap True if that is right and your payment is released to them. "
+                            + "Tap False if you have not moved in; your money stays safely held and our team will review.");
         } catch (IllegalStateException | IllegalArgumentException failure) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, failure.getMessage());
         }
@@ -141,10 +142,12 @@ public class BookingAgreementService {
             if (booking.respondToOwnerMoveIn(accepted, Instant.now(), key)) {
                 bookingRepository.save(booking);
                 auditService.recordMoveInResponse(intent, booking, accepted);
+String renterName = userRepository.findById(renterId).map(user -> user.getFullName()).orElse("Your renter");
                 notifications.bookingNotice(booking.getOwnerId(), bookingId, NotificationType.MOVE_IN_RESPONSE,
-                        accepted ? "Renter answered True" : "Move-in needs staff review",
-                        accepted ? "The renter accepted your report. The five-minute TEST payout wait has started."
-                                : "The renter answered False. Payment remains held and requires staff review.");
+                        accepted ? "Move-in confirmed!" : renterName + " says they have not moved in",
+                        accepted ? renterName + " confirmed they moved in. Your payment is on its way through Paystack."
+                                : renterName + " answered False, so no money has been released. The payment stays safely held while our team "
+                                        + "reviews and reaches out to you both.");
             }
         } catch (IllegalArgumentException | IllegalStateException failure) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, failure.getMessage());

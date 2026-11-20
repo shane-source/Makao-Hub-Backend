@@ -3,6 +3,7 @@ package com.makaohub.backend.renter.api;
 import com.makaohub.backend.renter.domain.RentalApplicationStatus;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 public record RentalApplicationResponse(
@@ -19,8 +20,13 @@ public record RentalApplicationResponse(
         String rejectionReason,
         String renterName,
         String renterAvatarUrl,
-        String renterVerificationStatus
+        String renterVerificationStatus,
+        LocalDate moveInDate,
+        String message
 ) {
+    public RentalApplicationResponse(UUID id, UUID listingId, RentalApplicationStatus status, Instant createdAt, Instant updatedAt, String rejectionReason, String renterName, String renterAvatarUrl, String renterVerificationStatus) {
+        this(id, listingId, status, createdAt, updatedAt, rejectionReason, renterName, renterAvatarUrl, renterVerificationStatus, null, null);
+    }
     public RentalApplicationResponse(UUID id, UUID listingId, RentalApplicationStatus status, Instant createdAt, Instant updatedAt, String rejectionReason) {
         this(id, listingId, status, createdAt, updatedAt, rejectionReason, null, null, null);
     }

@@ -209,6 +209,10 @@ public class User {
         return avatarObjectPath;
     }
 
+    public void removeAvatar() {
+        this.avatarObjectPath = null;
+    }
+
     public void changeAvatarObjectPath(String avatarObjectPath) {
         this.avatarObjectPath = Objects.requireNonNull(
                 avatarObjectPath

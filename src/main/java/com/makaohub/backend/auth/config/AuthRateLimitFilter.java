@@ -15,6 +15,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -29,6 +30,8 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
             Map.entry("/api/v1/staff/auth/forgot-password", new RateLimit(5, Duration.ofHours(1))),
             Map.entry("/api/v1/staff/auth/reset-password", new RateLimit(10, Duration.ofHours(1))),
             Map.entry("/api/v1/reports", new RateLimit(10, Duration.ofHours(1))),
+            // Jirani costs money per call. This only slows bursts; JiraniService keeps its own daily limit per user.
+            Map.entry("/api/v1/support/chat", new RateLimit(20, Duration.ofMinutes(10))),
             Map.entry("/api/v1/auth/login", new RateLimit(10, Duration.ofMinutes(1))),
 
             Map.entry("/api/v1/auth/register", new RateLimit(5, Duration.ofHours(1))),
@@ -62,6 +65,13 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
             Map.entry("/api/v1/sublessor/payments/test-destination", new RateLimit(5, Duration.ofHours(1)))
     );
 
+    /**
+     * Shared secret that lets the Makao Hub website tell us which visitor a call is for. The website sits in
+     * front of every browser sign-in, so without it all website users would share one address and one limit.
+     * Unset means the header is ignored and the connecting address is always used.
+     */
+    private static final String WEB_PROXY_KEY = blankToNull(System.getenv("MAKAO_WEB_PROXY_KEY"));
+
     // ponytail: per-instance limits reset on restart or cache eviction.
     // Use shared enforcement before deploying multiple replicas.
     private final Cache<String, Bucket> buckets =
@@ -90,7 +100,7 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
                 request.getRequestURI()
         );
 
-        String bucketKey = request.getRemoteAddr()
+        String bucketKey = clientAddress(request)
                 + "|"
                 + request.getRequestURI();
 
@@ -113,6 +123,27 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
         }
 
         writeRateLimitResponse(response, probe);
+    }
+
+    /** The visitor's address: the website's forwarded one only when it proves who it is, otherwise the socket's. */
+    private static String clientAddress(HttpServletRequest request) {
+        if (WEB_PROXY_KEY != null) {
+            String presented = request.getHeader("X-Makao-Web-Key");
+            String forwarded = request.getHeader("X-Makao-Client-Ip");
+            if (presented != null && forwarded != null
+                    && MessageDigest.isEqual(
+                            presented.getBytes(StandardCharsets.UTF_8),
+                            WEB_PROXY_KEY.getBytes(StandardCharsets.UTF_8))
+                    && forwarded.length() <= 45
+                    && forwarded.matches("[0-9a-fA-F:.]+")) {
+                return forwarded;
+            }
+        }
+        return request.getRemoteAddr();
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private Bucket createBucket(RateLimit rateLimit) {

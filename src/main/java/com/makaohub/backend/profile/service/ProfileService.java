@@ -19,6 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.client.RestClientResponseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Objects;
@@ -26,6 +29,8 @@ import java.util.UUID;
 
 @Service
 public class ProfileService {
+
+    private static final Logger log = LoggerFactory.getLogger(ProfileService.class);
 
     private final UserRepository userRepository;
     private final UserRoleRepository userRoleRepository;
@@ -51,6 +56,8 @@ public class ProfileService {
     public MyProfileResponse getMyProfile(
             UUID authenticatedUserId
     ) {
+        String stage = "account_lookup";
+        try {
         Objects.requireNonNull(
                 authenticatedUserId,
                 "Authenticated user ID cannot be null."
@@ -63,6 +70,7 @@ public class ProfileService {
             throw accountUnavailable();
         }
 
+        stage = "role_lookup";
         List<UserRole> userRoles =
                 userRoleRepository.findAllByUser_Id(
                         authenticatedUserId
@@ -76,15 +84,18 @@ public class ProfileService {
                 .getRole()
                 .getName();
 
+        stage = "phone_decryption";
         byte[] encryptedPhone = user.getPhoneCiphertext();
         String phoneNumber = encryptedPhone == null ? null : phoneProtectionService.decrypt(encryptedPhone);
 
+        stage = "avatar_storage";
         String avatarUrl = user.getAvatarObjectPath() == null
                 ? null
                 : storageClient.createSignedAvatarReadUrl(
                 user.getAvatarObjectPath()
         );
 
+        stage = "verification_lookup";
         return new MyProfileResponse(
                 user.getId(),
                 user.getFullName(),
@@ -98,6 +109,24 @@ public class ProfileService {
                         .map(RoleVerification::getStatus)
                         .orElse(VerificationStatus.NOT_STARTED)
         );
+        } catch (RuntimeException failure) {
+            // Do not log exception messages or stack traces: they can contain personal data,
+            // database details, signed URLs, or provider responses.
+            Throwable cause = failure;
+            for (int depth = 0; depth < 8 && cause.getCause() != null && cause.getCause() != cause; depth++) {
+                cause = cause.getCause();
+            }
+            int storageStatus = failure instanceof RestClientResponseException response
+                    ? response.getStatusCode().value() : 0;
+            if (failure instanceof AuthException) {
+                log.warn("PROFILE_LOAD_FAILED stage={} error={} cause={} storage_http={}",
+                        stage, failure.getClass().getSimpleName(), cause.getClass().getSimpleName(), storageStatus);
+            } else {
+                log.error("PROFILE_LOAD_FAILED stage={} error={} cause={} storage_http={}",
+                        stage, failure.getClass().getSimpleName(), cause.getClass().getSimpleName(), storageStatus);
+            }
+            throw failure;
+        }
     }
 
     @Transactional

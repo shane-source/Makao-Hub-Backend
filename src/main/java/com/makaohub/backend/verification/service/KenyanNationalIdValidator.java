@@ -58,7 +58,7 @@ public class KenyanNationalIdValidator {
         } catch (ResponseStatusException failure) {
             if (failure.getStatusCode() != HttpStatus.BAD_REQUEST) throw failure;
         }
-        if (type == VerificationDocumentType.ID_FRONT && matchesEnhancedFront(preparedImage, type)) return;
+        if (matchesEnhancedFront(preparedImage, type)) return;
         if (matchesRotated(preparedImage, type)) return;
         throw invalid();
     }
@@ -221,7 +221,7 @@ public class KenyanNationalIdValidator {
                     return true;
                 } catch (ResponseStatusException failure) {
                     if (failure.getStatusCode() != HttpStatus.BAD_REQUEST) throw failure;
-                    if (type == VerificationDocumentType.ID_FRONT && matchesEnhancedFront(rotated, type)) return true;
+                    if (matchesEnhancedFront(rotated, type)) return true;
                 } finally { java.util.Arrays.fill(rotated, (byte) 0); }
             }
             return false;
@@ -416,8 +416,22 @@ public class KenyanNationalIdValidator {
                 && hasAny(text, "GIVEN NAME", "GIVEN NAMES")
                 && hasAny(text, "SEX", "GENDER")
                 && hasAny(text, "DATE OF BIRTH", "DATE OF ISSUE", "DATE OF EXPIRY");
+        // Tolerant layout rule for photographed new-format cards: small labels such as
+        // "GIVEN NAME" or "DATE OF EXPIRY" are often misread, so accept a Kenyan card heading plus
+        // several approximately-matched field labels. Identity values are never fuzzy-matched.
+        boolean cardHeading = hasApproximateAny(text, "NATIONAL IDENTITY CARD", "NATIONAL ID CARD",
+                "KITAMBULISHO CHA TAIFA");
+        int cardLabels = (hasApproximate(text, "SURNAME") ? 1 : 0)
+                + (hasApproximateAny(text, "GIVEN NAME", "GIVEN NAMES") ? 1 : 0)
+                + (hasApproximate(text, "NATIONALITY") ? 1 : 0)
+                + (hasApproximate(text, "DATE OF BIRTH") ? 1 : 0)
+                + (hasApproximateAny(text, "DATE OF EXPIRY", "EXPIRY DATE") ? 1 : 0)
+                + (hasAny(text, "SEX", "GENDER") ? 1 : 0)
+                + (hasApproximateAny(text, "MAISHA NAMBA", "MAISHA NUMBER", "MAISHA CARD") ? 1 : 0)
+                + (hasApproximateAny(text, "PLACE OF BIRTH", "PLACE OF ISSUE") ? 1 : 0);
+        boolean tolerantCardFront = cardHeading && cardLabels >= 3;
         boolean front = kenya && NUMBER.matcher(text).find()
-                && (legacyFront || maishaFront || nationalIdentityCardFront);
+                && (legacyFront || maishaFront || nationalIdentityCardFront || tolerantCardFront);
 
         boolean legacyBack = isLegacyBack(text);
         boolean machineReadableBack = (text.contains("IDKYA") || text.contains("IDKEN"))

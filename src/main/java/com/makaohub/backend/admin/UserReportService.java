@@ -61,7 +61,8 @@ public class UserReportService {
                          WHEN 'SHARED_LISTING' THEN (SELECT title FROM sublessor_listings WHERE id=r.subject_id)
                          WHEN 'RENTAL_MESSAGE' THEN 'Rental conversation'
                          WHEN 'ROOMMATE_MESSAGE' THEN 'Roommate conversation'
-                       END AS subject_label
+                       END AS subject_label,
+                       (SELECT full_name FROM users WHERE id=r.reporter_id) AS reporter_name
                 FROM user_reports r WHERE r.state=? ORDER BY r.created_at,r.id
                 """,page,size,state);
         db.audit(staff.userId(),"REPORT_QUEUE_VIEWED",null,"Safety report triage",null,"VIEWED"); return result;

@@ -10,9 +10,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.UUID;
 
-/** Sends a generic email for new in-app notifications, without disclosing private content. */
+/** Emails every new in-app notification to its recipient: the same title and message they see in the app. */
 @Service
-@ConditionalOnProperty(name = "makao.notifications.email.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "makao.notifications.email.enabled", havingValue = "true", matchIfMissing = true)
 public class NotificationEmailDelivery {
     private final JdbcTemplate db;
     private final JavaMailSender mail;
@@ -24,7 +24,7 @@ public class NotificationEmailDelivery {
         this.from = properties.fromEmail();
     }
 
-    @Scheduled(fixedDelayString = "${makao.notifications.email.poll-ms:30000}")
+    @Scheduled(fixedDelayString = "${makao.notifications.email.poll-ms:10000}")
     public void deliverPending() {
         for (int count = 0; count < 20; count++) {
             var claimed = db.query("""
@@ -41,19 +41,21 @@ public class NotificationEmailDelivery {
     }
 
     void deliver(UUID notificationId) {
-        var recipients = db.query("""
-                SELECT u.email FROM notifications n JOIN users u ON u.id=n.user_id
+        var rows = db.query("""
+                SELECT u.email, n.title, n.body FROM notifications n JOIN users u ON u.id=n.user_id
                 WHERE n.id=? AND u.account_status='ACTIVE'
-                """, (row, index) -> row.getString(1), notificationId);
-        if (recipients.isEmpty() || !EmailOtpProperties.validEmail(recipients.getFirst())) {
+                """, (row, index) -> new String[] {row.getString(1), row.getString(2), row.getString(3)}, notificationId);
+        if (rows.isEmpty() || !EmailOtpProperties.validEmail(rows.getFirst()[0])) {
             finish(notificationId, "SKIPPED");
             return;
         }
+        String title = clean(rows.getFirst()[1]);
+        String body = rows.getFirst()[2] == null ? "" : rows.getFirst()[2].trim();
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(from);
-        message.setTo(recipients.getFirst());
-        message.setSubject("You have a Makao Hub notification");
-        message.setText("You have a new notification. Sign in to Makao Hub to view it.");
+        message.setTo(rows.getFirst()[0]);
+        message.setSubject(title.isEmpty() ? "You have a Makao Hub notification" : title);
+        message.setText(body + "\n\nSign in to Makao Hub to see more.");
         try {
             mail.send(message);
             finish(notificationId, "SENT");
@@ -61,6 +63,10 @@ public class NotificationEmailDelivery {
             // SMTP failures can be ambiguous; do not retry automatically and send duplicates.
             finish(notificationId, "FAILED");
         }
+    }
+
+    private static String clean(String value) {
+        return value == null ? "" : value.replaceAll("[\\r\\n]+", " ").trim();
     }
 
     private void finish(UUID id, String state) {

@@ -34,7 +34,8 @@ class OwnerListingPhotoAccessTest {
         SupabaseStorageClient storage = mock(SupabaseStorageClient.class);
         activeRole(users, roles, actor, RoleName.LANDLORD);
         when(listings.findByIdAndLandlordId(listingId, actor)).thenReturn(Optional.empty());
-        LandlordListingMediaService service = new LandlordListingMediaService(users, roles, listings, media, storage);
+        LandlordListingMediaService service = new LandlordListingMediaService(users, roles, listings, media, storage,
+                mock(com.makaohub.backend.payment.service.LandlordOfferService.class));
 
         ResponseStatusException error = assertThrows(ResponseStatusException.class,
                 () -> service.findPhotosForOwner(actor, listingId));
@@ -54,7 +55,8 @@ class OwnerListingPhotoAccessTest {
         SupabaseStorageClient storage = mock(SupabaseStorageClient.class);
         activeRole(users, roles, actor, RoleName.SUBLESSOR);
         when(listings.findByIdAndSublessorId(listingId, actor)).thenReturn(Optional.empty());
-        SublessorListingMediaService service = new SublessorListingMediaService(users, roles, listings, media, storage);
+        SublessorListingMediaService service = new SublessorListingMediaService(users, roles, listings, media, storage,
+                mock(com.makaohub.backend.payment.service.LandlordOfferService.class));
 
         ResponseStatusException error = assertThrows(ResponseStatusException.class,
                 () -> service.findPhotosForOwner(actor, listingId));

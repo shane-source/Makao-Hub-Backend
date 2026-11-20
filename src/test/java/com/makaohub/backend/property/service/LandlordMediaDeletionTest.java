@@ -82,7 +82,8 @@ class LandlordMediaDeletionTest {
                 roles,
                 listings,
                 media,
-                storage
+                storage,
+                mock(com.makaohub.backend.payment.service.LandlordOfferService.class)
         );
 
         private void activeLandlord(UUID actor) {

@@ -22,8 +22,8 @@ public class BookingDepositPricingService {
     public long depositAmountMinor(long monthlyRentKes) {
         String raw = environment.getProperty(DEPOSIT_KEY);
         if (raw == null || raw.isBlank()) {
-            if (environment.acceptsProfiles(Profiles.of("mock"))) {
-                // Test-only convention used by the renter reference screens; live profiles still require explicit pricing.
+            if (environment.acceptsProfiles(Profiles.of("mock", "paystack"))) {
+                // Test-only convention (deposit = one month's rent) for the mock and Paystack TEST profiles; any other profile still requires explicit pricing.
                 return Math.multiplyExact(monthlyRentKes, 100);
             }
             throw new ResponseStatusException(

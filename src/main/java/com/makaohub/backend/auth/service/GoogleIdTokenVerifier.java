@@ -1,6 +1,10 @@
 package com.makaohub.backend.auth.service;
 
 import com.makaohub.backend.auth.config.GoogleSecurityProperties;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
@@ -14,7 +18,9 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Locale;
 import java.util.Set;
 
@@ -43,7 +49,10 @@ public class GoogleIdTokenVerifier {
                     null
             );
 
+    private static final Logger LOG = LoggerFactory.getLogger(GoogleIdTokenVerifier.class);
+
     private final JwtDecoder jwtDecoder;
+    private final String expectedClientId;
 
     @Autowired
     public GoogleIdTokenVerifier(
@@ -72,15 +81,23 @@ public class GoogleIdTokenVerifier {
         );
 
         this.jwtDecoder = decoder;
+        this.expectedClientId = properties.clientId();
     }
 
     // Tests can supply a decoder without contacting Google.
     GoogleIdTokenVerifier(JwtDecoder jwtDecoder) {
         this.jwtDecoder = jwtDecoder;
+        this.expectedClientId = "";
     }
 
     public VerifiedGoogleIdentity verify(String idToken) {
-        Jwt jwt = jwtDecoder.decode(idToken);
+        Jwt jwt;
+        try {
+            jwt = jwtDecoder.decode(idToken);
+        } catch (JwtException exception) {
+            logRejection(idToken, exception);
+            throw exception;
+        }
 
         String fullName = jwt.getClaimAsString("name");
 
@@ -91,6 +108,29 @@ public class GoogleIdTokenVerifier {
                         .toLowerCase(Locale.ROOT),
                 fullName == null ? null : fullName.strip()
         );
+    }
+
+    /**
+     * Says why Google sign-in failed. Logs the validator's message and the token's audience and issuer, which
+     * are public claims. The token itself and the person's details are never logged.
+     */
+    private void logRejection(String idToken, JwtException exception) {
+        String audience = "?";
+        String issuer = "?";
+        String expires = "?";
+        try {
+            String[] parts = idToken.split("\\.");
+            JsonNode claims = new ObjectMapper().readTree(
+                    Base64.getUrlDecoder().decode(parts[1]));
+            audience = claims.path("aud").asText("?");
+            issuer = claims.path("iss").asText("?");
+            expires = claims.path("exp").asText("?");
+        } catch (RuntimeException | java.io.IOException ignored) {
+            // Not a readable token; the validator message below still says why.
+        }
+        LOG.warn("Google ID token rejected: {} | token audience={} issuer={} exp={} | backend expects audience={} | now={}",
+                exception.getMessage(), audience, issuer, expires,
+                expectedClientId.isEmpty() ? "(not set)" : expectedClientId, Instant.now().getEpochSecond());
     }
 
     public VerifiedRoleSwitchIdentity verifyForRoleSwitch(

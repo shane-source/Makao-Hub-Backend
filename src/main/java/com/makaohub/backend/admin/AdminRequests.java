@@ -16,7 +16,7 @@ public final class AdminRequests {
                               @NotBlank @Size(max=500) String reason) { }
     public record Assign(@NotNull UUID reviewerId, @NotBlank @Size(max=500) String reason) { }
     public record Decision(boolean approve, @NotNull Instant expectedUpdatedAt, @NotBlank @Size(max=500) String reason) { }
-    public record MessageAction(boolean escalate, @NotBlank @Size(max=500) String reason) { }
+    public record MessageAction(boolean escalate, @NotBlank @Size(max=500) String reason, boolean clear) { }
     public record Report(@NotBlank String subjectKind, @NotNull UUID subjectId, @NotBlank String category,
                          @NotBlank @Size(max=1000) String description) { }
     public record ReportAction(@NotBlank String state, @NotBlank String priority,

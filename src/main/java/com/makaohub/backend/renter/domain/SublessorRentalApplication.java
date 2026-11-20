@@ -12,6 +12,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -33,6 +34,12 @@ public class SublessorRentalApplication {
     @Column(nullable = false, length = 20)
     private RentalApplicationStatus status =
             RentalApplicationStatus.SUBMITTED;
+
+    @Column(name = "move_in_date")
+    private LocalDate moveInDate;
+
+    @Column(name = "message", length = 500)
+    private String message;
 
     @Column(name = "rejection_reason", length = 500)
     private String rejectionReason;
@@ -60,6 +67,16 @@ public class SublessorRentalApplication {
         this.sublessorListingId =
                 Objects.requireNonNull(sublessorListingId);
     }
+
+    public SublessorRentalApplication(UUID renterId, UUID sublessorListingId, LocalDate moveInDate, String message) {
+        this(renterId, sublessorListingId);
+        this.moveInDate = moveInDate;
+        this.message = message;
+    }
+
+    public LocalDate getMoveInDate() { return moveInDate; }
+
+    public String getMessage() { return message; }
 
     public void markUnderReview() {
         requireStatus(RentalApplicationStatus.SUBMITTED);

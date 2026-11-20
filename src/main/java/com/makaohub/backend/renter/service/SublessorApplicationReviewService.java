@@ -192,7 +192,8 @@ public class SublessorApplicationReviewService {
                 application.getCreatedAt(),
                 application.getUpdatedAt(),
                 application.getRejectionReason(),
-                applicant.name, applicant.avatarUrl, applicant.verificationStatus
+                applicant.name, applicant.avatarUrl, applicant.verificationStatus,
+                application.getMoveInDate(), application.getMessage()
         );
     }
 

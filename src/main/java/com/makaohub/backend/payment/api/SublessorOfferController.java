@@ -37,8 +37,18 @@ public class SublessorOfferController {
         return new LandlordOfferController.Catalogue(1, offers.activeSublessorListingLimit(owner),
                 Arrays.stream(LandlordOffer.values()).map(value ->
                         new LandlordOfferController.Offer("SUB_" + value.name(), value.amountMinor,
-                                value.duration.toDays(), value.listingLimit)).toList(),
-                offers.activeSublessorGrants(owner));
+                                value.duration.toDays(), value.listingLimit, value.estimatedReach,
+                                LandlordOfferController.publicPhotoLimit(value.photoLimit), value.includedBoosts)).toList(),
+                offers.activeSublessorGrants(owner), LandlordOffer.FREE_PHOTO_LIMIT,
+                LandlordOfferController.publicPhotoLimit(offers.photoLimit(owner, true)),
+                offers.boostCredits(owner, true));
+    }
+
+    @PostMapping("/boost-credit/redeem")
+    public LandlordOfferController.RedeemResult redeemIncludedBoost(@AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody LandlordOfferController.RedeemRequest request) {
+        return new LandlordOfferController.RedeemResult(
+                offers.redeemIncludedBoost(sublessor(jwt), request.listingId(), true));
     }
 
     @GetMapping("/insights")

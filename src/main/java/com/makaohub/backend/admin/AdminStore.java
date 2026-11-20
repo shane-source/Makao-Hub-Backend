@@ -48,13 +48,16 @@ public class AdminStore {
         return Boolean.TRUE.equals(sql.queryForObject(query, Boolean.class, args));
     }
 
-    public record Page(List<Map<String,Object>> items, int page, int size, boolean hasNext) { }
+    public record Page(List<Map<String,Object>> items, int page, int size, boolean hasNext, long total) {
+        public Page(List<Map<String,Object>> items, int page, int size, boolean hasNext) { this(items, page, size, hasNext, items.size()); }
+    }
     public Page page(String query, int page, int size, Object... args) {
         if (page < 0 || page > 10_000 || size < 1 || size > 50) throw bad("Page size must be 1–50; page must be 0–10000.");
         var parameters = new ArrayList<>(Arrays.asList(args));
         parameters.add(size + 1); parameters.add((long) page * size);
         var found = rows(query + " LIMIT ? OFFSET ?", parameters.toArray());
-        return new Page(found.stream().limit(size).toList(), page, size, found.size() > size);
+        Long total = sql.queryForObject("SELECT COUNT(*) FROM (" + query + ") counted", Long.class, args);
+        return new Page(found.stream().limit(size).toList(), page, size, found.size() > size, total == null ? 0L : total);
     }
 
     public void audit(UUID actor, String action, UUID subject, String reason, String before, String after) {
