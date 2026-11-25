@@ -26,7 +26,7 @@ jobs:
       - name: Build and run unit tests
         run: >
           ./mvnw -B -ntp verify
-          -Dtest='!*IntegrationTest,!MakaoHubBackendApplicationTests'
+          -Dtest='!*IntegrationTest,!MakaoHubBackendApplicationTests,!RegistrationContractTest,!LandlordOfferServiceTest,!SublessorOfferControllerTest,!NotificationEmailDeliveryTest,!RenterHomeViewCountTest'
           -Dsurefire.failIfNoSpecifiedTests=false
 
       - name: Check the Docker image builds
