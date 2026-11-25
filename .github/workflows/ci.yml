@@ -1,0 +1,33 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      # Unit tests only. The integration tests and the full application
+      # context test need database and secret settings (DB_URL, JWT keys and
+      # so on) that CI does not have. Add them in a later step.
+      - name: Build and run unit tests
+        run: >
+          ./mvnw -B -ntp verify
+          -Dtest='!*IntegrationTest,!MakaoHubBackendApplicationTests'
+          -Dsurefire.failIfNoSpecifiedTests=false
+
+      - name: Check the Docker image builds
+        run: docker build -t makao-hub-backend:ci .
